@@ -68,7 +68,8 @@ manager_free_mem_alloc(struct Compartment* comp, void* ptr)
     }
 
     assert(curr_alloc != NULL && "Memory allocation not found to be freed.");
-    assert(munmap((void*) curr_alloc->ptr, curr_alloc->size) == 0);
+    size_t munmap_res = munmap((void*) curr_alloc->ptr, curr_alloc->size);
+    assert(munmap_res == 0);
     if (curr_alloc->prev_alloc != NULL)
     {
         curr_alloc->prev_alloc->next_alloc = curr_alloc->next_alloc;
