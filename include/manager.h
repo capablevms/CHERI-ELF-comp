@@ -9,7 +9,6 @@
 
 // vDSO wrapper needed includes
 #include <sys/time.h>
-//#include <sys/vdso.h>
 
 /*******************************************************************************
  * Compartment
