@@ -334,18 +334,6 @@ comp_map(struct Compartment* to_map)
     to_map->mapped = true;
 }
 
-void
-comp_map_full(struct Compartment* to_map)
-{
-    assert(!(to_map->mapped || to_map->mapped_full));
-    void* map_result = mmap((void*) to_map->base, to_map->size,
-        PROT_WRITE | PROT_READ | PROT_EXEC, // TODO
-        MAP_PRIVATE | MAP_FIXED,
-        to_map->fd, 0);
-    assert(map_result != MAP_FAILED);
-    to_map->mapped_full = true;
-}
-
 void ddc_set(void *__capability cap) {
     assert(cap != NULL);
     asm volatile("MSR DDC, %[cap]" : : [cap] "C"(cap) : "memory");
