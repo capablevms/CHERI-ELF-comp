@@ -30,6 +30,9 @@ struct intercept_patch
     int instr;
 };
 
+/* Struct representing one segment of an ELF binary.
+ *
+ * TODO expand */
 struct SegmentMap
 {
     uintptr_t mem_bot;
