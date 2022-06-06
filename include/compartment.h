@@ -20,6 +20,8 @@
 #define align_down(x, align)    __builtin_align_down(x, align)
 #define align_up(x, align)      __builtin_align_up(x, align)
 
+// Maximum number of allowed segments per loaded ELF file
+// TODO rethink number/make it a parameter
 #define SEG_MAX_COUNT 20
 
 struct func_intercept;
