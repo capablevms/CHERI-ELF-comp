@@ -244,7 +244,7 @@ comp_add_intercept(struct Compartment* new_comp, uintptr_t intercept_target, str
     assert(offset < (1 << 27));
     offset &= (1 << 26) - 1;
     const int amd_b_instr_mask = 0b101 << 26;
-    uintptr_t instr_binary = amd_b_instr_mask | offset;
+    int32_t instr_binary = amd_b_instr_mask | offset;
     int* init_addr_ptr = (void*) intercept_target;
     struct intercept_patch new_patch = { init_addr_ptr, instr_binary };
     new_comp->patches[new_comp->curr_intercept_count] = new_patch;
