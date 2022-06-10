@@ -355,6 +355,7 @@ comp_exec(struct Compartment* to_exec)
 
     // TODO handle register clobbering stuff (`syscall-restrict` example)
     // https://github.com/capablevms/cheri_compartments/blob/master/code/signal_break.c#L46
+    // TODO save sp/lr on the compartment stack, and ensure they can't be misused somehow
     asm("str lr, [sp, #-16]!\n\t"
         "mov sp, %[comp_sp]\n\t"
         "ldr c0, %[comp_ddc]\n\t"
