@@ -29,7 +29,7 @@ struct func_intercept;
 struct intercept_patch
 {
     int* patch_addr;
-    int32_t instr;
+    uint32_t instr;
 };
 
 /* Struct representing one segment of an ELF binary.
