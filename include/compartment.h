@@ -24,6 +24,10 @@
 // TODO rethink number/make it a parameter
 #define SEG_MAX_COUNT 20
 
+// TODO once things stabilize, recheck if all struct members are required
+// currently there's quite a bit of redundancy to make things easier to think
+// about
+
 struct func_intercept;
 
 struct intercept_patch
