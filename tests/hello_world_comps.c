@@ -6,8 +6,7 @@ extern struct Compartment* loaded_comp;
 char*
 get_full_path(char* path)
 {
-    char buf[PATH_MAX];
-    char* res = realpath(path, buf);
+    char* res = realpath(path, NULL);
     assert(res != NULL);
     return res;
 }
@@ -29,6 +28,8 @@ main(int argc, char** argv)
     comp_print(hw_comp);
     comp_map(hw_comp);
     int comp_result = comp_exec(hw_comp);
+
     comp_clean(hw_comp);
+    free(comp_argv[0]);
     return comp_result;
 }
