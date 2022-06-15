@@ -345,7 +345,7 @@ comp_exec(struct Compartment* to_exec)
     void* fn = (void*) to_exec->entry_point;
     void* wrap_sp;
 
-    setup_stack(to_exec);
+    /*setup_stack(to_exec);*/
 
     int64_t result;
 

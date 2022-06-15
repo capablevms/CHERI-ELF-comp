@@ -5,5 +5,5 @@ int
 main(void)
 {
     time_t seconds = time(NULL);
-    return seconds;
+    return 0;
 }
