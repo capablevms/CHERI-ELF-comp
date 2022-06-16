@@ -10,7 +10,6 @@ add_executable(lua-simple
     ${TEST_DIR}/lua_simple.c
     )
 add_dependencies(lua-simple lualib)
-#target_link_directories(lua-simple PUBLIC ${LUA_INSTALL_DIR}/lib)
 target_link_libraries(lua-simple lualib dl m)
 target_include_directories(lua-simple PUBLIC ${LUA_INSTALL_DIR}/include)
 target_compile_options(lua-simple PUBLIC -static) # -fPIE -pie

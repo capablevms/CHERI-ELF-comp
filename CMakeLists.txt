@@ -9,10 +9,15 @@ set(INCLUDE_DIR ${CMAKE_SOURCE_DIR}/include)
 set(LUA_DIR ${CMAKE_SOURCE_DIR}/third-party/lua)
 set(LUA_INSTALL_DIR ${LUA_DIR}/install)
 
-add_custom_target(
-    lua
+add_custom_command(
+    OUTPUT ${LUA_INSTALL_DIR}/lib/liblua.a
     COMMAND make && make local
     WORKING_DIRECTORY ${LUA_DIR}
+)
+
+add_custom_target(
+    lua
+    DEPENDS ${LUA_INSTALL_DIR}/lib/liblua.a
 )
 add_library(lualib STATIC IMPORTED GLOBAL)
 add_dependencies(lualib lua)
