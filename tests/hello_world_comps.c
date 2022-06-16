@@ -3,14 +3,6 @@
 
 extern struct Compartment* loaded_comp;
 
-char*
-get_full_path(char* path)
-{
-    char* res = realpath(path, NULL);
-    assert(res != NULL);
-    return res;
-}
-
 int
 main(int argc, char** argv)
 {
@@ -22,7 +14,7 @@ main(int argc, char** argv)
     struct Compartment* hw_comp = comp_from_elf(file);
     loaded_comp = hw_comp; // TODO
     hw_comp->argc = 1;
-    char* comp_argv[] = { get_full_path(file) };
+    char* comp_argv[] = { file };
     hw_comp->argv = comp_argv;
     log_new_comp(hw_comp);
     comp_print(hw_comp);
