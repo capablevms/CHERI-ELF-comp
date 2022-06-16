@@ -22,11 +22,11 @@ from run_tests_common import boot_cheribsd, run_tests_main
 def run_tests(qemu: boot_cheribsd.QemuCheriBSDInstance, args: argparse.Namespace) -> bool:
     if args.sysroot_dir is not None:
         boot_cheribsd.set_ld_library_path_with_sysroot(qemu)
-    boot_cheribsd.info("Running tests for cheri-morello-compartmentalisation")
+    boot_cheribsd.info("Running tests for CHERI-ELF-compartments")
 
     # Run command on host to test the executed client
     os.chdir(f"{args.build_dir}/build")
-    subprocess.run(["/usr/bin/ctest", "-V"], check=True)
+    subprocess.run(["/usr/bin/ctest", "-V", "--output-on-failure"], check=True)
     return True
 
 if __name__ == '__main__':
