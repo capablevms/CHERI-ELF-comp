@@ -4,7 +4,7 @@
 # == CHANGE THE SETTINGS BELOW TO SUIT YOUR ENVIRONMENT =======================
 
 # CHERI
-CC=/home/cheriworker/cheri/output/morello-sdk/bin/clang
+CC?=/home/cheriworker/cheri/output/morello-sdk/bin/clang
 CFLAGS= -Og -g -Wall -Wextra -DLUA_COMPAT_5_3 $(SYSCFLAGS) $(MYCFLAGS)
 MYCFLAGS=--config cheribsd-morello-hybrid.cfg -g
 MYLDFLAGS=--config cheribsd-morello-hybrid.cfg -g
