@@ -2,24 +2,16 @@
 
 add_executable(hwwrap
     ${TEST_DIR}/hello_world_comps.c
-    #${SRC_DIR}/compartment.c
-    #${SRC_DIR}/manager.c
-    #${SRC_DIR}/mem_mng.c
     )
 target_include_directories(hwwrap PUBLIC ${INCLUDE_DIR})
 target_link_libraries(hwwrap PUBLIC chcomp)
 
-#add_executable(simple
-    #${TEST_DIR}/simple.c
-    #)
-#target_compile_options(simple PUBLIC -static) # -fPIE -pie
-#target_link_options(simple PUBLIC -static "LINKER:-image-base=0x1000000") # -fPIE -ie
-
 add_executable(lua-simple
     ${TEST_DIR}/lua_simple.c
     )
-target_link_directories(lua-simple PUBLIC ${LUA_INSTALL_DIR}/lib)
-target_link_libraries(lua-simple ${LUA_INSTALL_DIR}/lib/liblua.a dl m)
+add_dependencies(lua-simple lualib)
+#target_link_directories(lua-simple PUBLIC ${LUA_INSTALL_DIR}/lib)
+target_link_libraries(lua-simple lualib dl m)
 target_include_directories(lua-simple PUBLIC ${LUA_INSTALL_DIR}/include)
 target_compile_options(lua-simple PUBLIC -static) # -fPIE -pie
 target_link_options(lua-simple PUBLIC -static "LINKER:-image-base=0x1000000") # -fPIE -ie

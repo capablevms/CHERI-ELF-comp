@@ -5,19 +5,26 @@ set(TEST_DIR ${CMAKE_SOURCE_DIR}/tests)
 set(SRC_DIR ${CMAKE_SOURCE_DIR}/src)
 set(INCLUDE_DIR ${CMAKE_SOURCE_DIR}/include)
 
-set(LUA_DIR ${CMAKE_SOURCE_DIR}/third_party/lua)
+# Build lua
+set(LUA_DIR ${CMAKE_SOURCE_DIR}/third-party/lua)
 set(LUA_INSTALL_DIR ${LUA_DIR}/install)
 
-# TODO double check this works from scratch
-# Build lua
-#add_custom_target(
-    #lua
-    #COMMAND make && make local
-    #WORKING_DIRECTORY ${LUA_DIR}
-#)
+add_custom_target(
+    lua
+    COMMAND make && make local
+    WORKING_DIRECTORY ${LUA_DIR}
+)
+add_library(lualib STATIC IMPORTED GLOBAL)
+add_dependencies(lualib lua)
+set_target_properties(lualib
+    PROPERTIES
+    IMPORTED_LOCATION ${LUA_INSTALL_DIR}/lib/liblua.a
+)
 
+# Build sources
 add_subdirectory(${SRC_DIR})
 
+# Build tests
 if (CMAKE_PROJECT_NAME STREQUAL PROJECT_NAME)
     include(CTest)
 endif()
