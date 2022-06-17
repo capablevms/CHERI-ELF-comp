@@ -9,16 +9,24 @@ comp_init()
     // TODO order
     struct Compartment* new_comp = (struct Compartment*) malloc(sizeof(struct Compartment));
     new_comp->id = comps_id++;
+
+    new_comp->phdr = 0;
+    new_comp->ddc = NULL;
+
     new_comp->size = 0;
+    new_comp->base = 0;
+    new_comp_entry_point = 0;
+    new_comp->relas_cnt = 0;
     new_comp->mapped = false;
     new_comp->mapped_full = false;
+
     new_comp->seg_count = 0;
     new_comp->segs_size = 0;
-    new_comp->page_size = sysconf(_SC_PAGESIZE);
-    new_comp->phdr = 0;
+
     new_comp->alloc_head = NULL;
+    new_comp->page_size = sysconf(_SC_PAGESIZE);
     new_comp->curr_intercept_count = 0;
-    new_comp->ddc = NULL;
+
     return new_comp;
 }
 
