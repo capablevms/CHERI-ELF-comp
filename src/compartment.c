@@ -15,7 +15,7 @@ comp_init()
 
     new_comp->size = 0;
     new_comp->base = 0;
-    new_comp_entry_point = 0;
+    new_comp->entry_point = 0;
     new_comp->relas_cnt = 0;
     new_comp->mapped = false;
     new_comp->mapped_full = false;
