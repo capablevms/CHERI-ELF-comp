@@ -6,6 +6,10 @@ build_dir="$(pwd)/build"
 src_dir="$(pwd)"
 cheri_dir="/home/buildbot/cheri/output"
 
+# Apply lua patch
+lua_dir="$(src_dir)/third-party/lua"
+patch -d $(lua_dir) -i ../lua.patch
+
 # Build project locally
 export CC=$cheri_dir/morello-sdk/bin/clang
 export CFLAGS="--config cheribsd-morello-hybrid.cfg"
