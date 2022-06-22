@@ -7,8 +7,8 @@ src_dir="$(pwd)"
 cheri_dir="/home/buildbot/cheri/output"
 
 # Apply lua patch
-lua_dir="$(src_dir)/third-party/lua"
-patch -d $(lua_dir) -i ../lua.patch
+lua_dir="$src_dir/third-party/lua"
+patch -d $lua_dir -i ../lua.patch
 
 # Build project locally
 export CC=$cheri_dir/morello-sdk/bin/clang
