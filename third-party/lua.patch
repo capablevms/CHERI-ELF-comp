@@ -1,0 +1,40 @@
+diff --git a/makefile b/makefile
+index d46e650c..de080ae0 100644
+--- a/makefile
++++ b/makefile
+@@ -28,8 +28,8 @@ CWARNSCPP= \
+ 
+ # Warnings for gcc, not valid for clang
+ CWARNGCC= \
+-	-Wlogical-op \
+-	-Wno-aggressive-loop-optimizations \
++	#-Wlogical-op \
++	#-Wno-aggressive-loop-optimizations \
+ 
+ 
+ # The next warnings are neither valid nor needed for C++
+@@ -66,19 +66,17 @@ LOCAL = $(TESTS) $(CWARNS)
+ 
+ 
+ # enable Linux goodies
+-MYCFLAGS= $(LOCAL) -std=c99 -DLUA_USE_LINUX -DLUA_USE_READLINE
+-MYLDFLAGS= $(LOCAL) -Wl,-E
+-MYLIBS= -ldl -lreadline
++MYCFLAGS= --config cheribsd-morello-hybrid.cfg -g $(LOCAL) -std=c99 -DLUA_USE_LINUX
++MYLDFLAGS= --config cheribsd-morello-hybrid.cfg -g $(LOCAL) -Wl,-E
++MYLIBS= -ldl
+ 
+ 
+-CC= gcc
+-CFLAGS= -Wall -O2 $(MYCFLAGS) -fno-stack-protector -fno-common -march=native
++CC?=/home/cheriworker/cheri/output/morello-sdk/bin/clang
++CFLAGS= -Wall -Og $(MYCFLAGS) -fno-stack-protector -fno-common
+ AR= ar rc
+ RANLIB= ranlib
+ RM= rm -f
+ 
+-
+-
+ # == END OF USER SETTINGS. NO NEED TO CHANGE ANYTHING BELOW THIS LINE =========
+ 
+ 

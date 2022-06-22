@@ -7,23 +7,25 @@ set(INCLUDE_DIR ${CMAKE_SOURCE_DIR}/include)
 
 # Build lua
 set(LUA_DIR ${CMAKE_SOURCE_DIR}/third-party/lua)
-set(LUA_INSTALL_DIR ${LUA_DIR}/install)
+set(LUA_INSTALL_DIR ${LUA_DIR})
+set(LUA_LIB_PATH ${LUA_DIR}/liblua.a)
+set(LUA_INCLUDE_DIR ${LUA_DIR})
 
 add_custom_command(
-    OUTPUT ${LUA_INSTALL_DIR}/lib/liblua.a
-    COMMAND make && make local
+    OUTPUT ${LUA_LIB_PATH}
+    COMMAND make a
     WORKING_DIRECTORY ${LUA_DIR}
 )
 
 add_custom_target(
     lua
-    DEPENDS ${LUA_INSTALL_DIR}/lib/liblua.a
+    DEPENDS ${LUA_LIB_PATH}
 )
 add_library(lualib STATIC IMPORTED GLOBAL)
 add_dependencies(lualib lua)
 set_target_properties(lualib
     PROPERTIES
-    IMPORTED_LOCATION ${LUA_INSTALL_DIR}/lib/liblua.a
+    IMPORTED_LOCATION ${LUA_LIB_PATH}
 )
 
 # Build sources

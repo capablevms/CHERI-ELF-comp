@@ -11,7 +11,7 @@ add_executable(lua-simple
     )
 add_dependencies(lua-simple lualib)
 target_link_libraries(lua-simple lualib dl m)
-target_include_directories(lua-simple PUBLIC ${LUA_INSTALL_DIR}/include)
+target_include_directories(lua-simple PUBLIC ${LUA_INCLUDE_DIR})
 target_compile_options(lua-simple PUBLIC -static) # -fPIE -pie
 target_link_options(lua-simple PUBLIC -static "LINKER:-image-base=0x1000000") # -fPIE -ie
 
