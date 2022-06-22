@@ -2,6 +2,13 @@
 
 set -e
 
+# Only execute on `morello-hybrid`
+if [ "$1" != "morello-hybrid" ]
+then
+    echo "Expecting `morello-hybrid` buildbot argument."
+    exit 0
+fi
+
 build_dir="$(pwd)/build"
 src_dir="$(pwd)"
 cheri_dir="/home/buildbot/cheri/output"
