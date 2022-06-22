@@ -6,6 +6,9 @@ build_dir="$(pwd)/build"
 src_dir="$(pwd)"
 cheri_dir="/home/buildbot/cheri/output"
 
+# Update submodules
+git submodule update --init
+
 # Apply lua patch
 lua_dir="$src_dir/third-party/lua"
 patch -d $lua_dir -i ../lua.patch
