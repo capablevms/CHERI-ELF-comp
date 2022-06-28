@@ -22,7 +22,10 @@ comp_init()
 
     new_comp->seg_count = 0;
     new_comp->segs_size = 0;
-
+    new_comp->mng_trans_fn_sz = sizeof(uint32_t) * COMP_TRANS_FN_INSTR_CNT; // TODO ptr arithmetic
+    new_comp->relas_cnt = 0;
+    new_comp->page_size = sysconf(_SC_PAGESIZE);
+    new_comp->phdr = 0;
     new_comp->alloc_head = NULL;
     new_comp->page_size = sysconf(_SC_PAGESIZE);
     new_comp->curr_intercept_count = 0;
@@ -121,18 +124,26 @@ comp_from_elf(char* filename)
 
     // Define scratch memory available
     new_comp->scratch_mem_base = align_up(new_comp->segs[new_comp->seg_count - 1]->mem_top + new_comp->page_size, new_comp->page_size);
-    new_comp->scratch_mem_size = 0x40000UL;
+    new_comp->max_manager_caps_count = 10; // TODO
+    new_comp->scratch_mem_heap_size = 0x40000UL;
+    new_comp->scratch_mem_size =
+            new_comp->scratch_mem_heap_size +
+            new_comp->max_manager_caps_count * sizeof(void* __capability) +
+            new_comp->mng_trans_fn_sz;;
     new_comp->scratch_mem_alloc = 0;
-    new_comp->scratch_mem_stack_top = align_down(new_comp->scratch_mem_base + new_comp->scratch_mem_size, 16);
+    new_comp->scratch_mem_stack_top = align_down(new_comp->scratch_mem_base + new_comp->scratch_mem_heap_size, 16);
     new_comp->scratch_mem_stack_size = 0x8000UL;
+    new_comp->manager_caps = new_comp->scratch_mem_stack_top;
+    new_comp->active_manager_caps_count = 0;
+    new_comp->mng_trans_fn = new_comp->manager_caps + new_comp->max_manager_caps_count * sizeof(void* __capability);
     assert(new_comp->scratch_mem_base % 16 == 0);
     assert((new_comp->scratch_mem_base + new_comp->scratch_mem_size) % 16 == 0);
     assert(new_comp->scratch_mem_stack_top % 16 == 0);
     assert((new_comp->scratch_mem_stack_top - new_comp->scratch_mem_stack_size) % 16 == 0);
+    assert(new_comp->scratch_mem_size % 16 == 0);
 
     Elf64_Shdr comp_symtb_hdr; // TODO change name
     size_t found = 0;
-    const size_t to_find = 1 + MAX_INTERCEPT_COUNT;
     for (size_t i = 0; i < comp_ehdr.e_shnum; ++i)
     {
         pread_res = pread((int) new_comp->fd, &comp_symtb_hdr, sizeof(Elf64_Shdr),
@@ -181,7 +192,7 @@ comp_from_elf(char* filename)
                 }
                 else
                 {
-                    for (size_t i = 0; i < MAX_INTERCEPT_COUNT; ++i)
+                    for (size_t i = 0; i < sizeof(to_intercept_funcs) / sizeof(to_intercept_funcs[0]); ++i)
                     {
                         if (!strcmp(comp_intercept_funcs[i].func_name, &comp_strtb[curr_sym.st_name]))
                         {
@@ -190,10 +201,6 @@ comp_from_elf(char* filename)
                             break;
                         }
                     }
-                }
-                if (found == to_find)
-                {
-                    break;
                 }
             }
             free(comp_symtb);
@@ -228,7 +235,6 @@ comp_from_elf(char* filename)
             continue;
         }
     }
-    /*assert(found == to_find);*/
 
     comp_register_ddc(new_comp);
     comp_print(new_comp);
@@ -239,7 +245,7 @@ void
 comp_register_ddc(struct Compartment* new_comp)
 {
     void* __capability new_ddc = cheri_address_set(manager_ddc, new_comp->base);
-    new_ddc = cheri_bounds_set(new_ddc, new_comp->size + new_comp->scratch_mem_size + new_comp->scratch_mem_stack_size);
+    new_ddc = cheri_bounds_set(new_ddc, new_comp->size + new_comp->scratch_mem_size);
     // TODO bounds double-check
     new_comp->ddc = new_ddc;
 }
@@ -247,14 +253,71 @@ comp_register_ddc(struct Compartment* new_comp)
 void
 comp_add_intercept(struct Compartment* new_comp, uintptr_t intercept_target, struct func_intercept intercept_data)
 {
+    // TODO check whether negative values break anything in all these generated functions
     printf("Found `%s` func at %p.\n", intercept_data.func_name, (void*) intercept_target);
-    int offset = (intercept_data.redirect_func - intercept_target) / 4;
-    assert(offset < (1 << 27));
-    offset &= (1 << 26) - 1;
-    const int arm_b_instr_mask = 0b101 << 26;
-    uint32_t instr_binary = arm_b_instr_mask | offset;
-    int* init_addr_ptr = (void*) intercept_target;
-    struct intercept_patch new_patch = { init_addr_ptr, instr_binary };
+    int32_t new_instrs[INTERCEPT_INSTR_COUNT];
+    size_t new_instr_idx = 0;
+    uintptr_t comp_manager_cap_addr = new_comp->manager_caps + new_comp->active_manager_caps_count * sizeof(void* __capability); // TODO
+
+    const int32_t arm_function_target_register = 0b01010; // use `x10` for now
+    const int32_t arm_transition_target_register = 0b01011; // use `x11` for now
+
+    // movz x0, $target_fn_addr:lo16
+    // movk x0, $target_fn_addr:hi16
+    /*assert(intercept_target < (1 << 32));*/
+    const int32_t arm_movz_instr_mask = 0b11010010100 << 21;
+    const int32_t arm_movk_instr_mask = 0b11110010101 << 21;
+    const ptraddr_t target_address_lo16 = (intercept_data.redirect_func & ((1 << 16) - 1)) << 5;
+    const ptraddr_t target_address_hi16 = (intercept_data.redirect_func >> 16) << 5;
+    const int32_t arm_movz_intr = arm_movz_instr_mask | target_address_lo16 | arm_function_target_register;
+    const int32_t arm_movk_intr = arm_movk_instr_mask | target_address_hi16 | arm_function_target_register;
+    new_instrs[new_instr_idx++] = arm_movz_intr;
+    new_instrs[new_instr_idx++] = arm_movk_intr;
+
+    /* `ldpbr` instr generation */
+    // TODO do we have space to insert these instructions?
+    // TODO what if we need to jump more than 4GB away?
+    // Use `adrp` to get address close to address of manager capability required
+    // adrp x11, $OFFSET
+    const int32_t arm_adrp_instr_mask = 0b10010000 << 24;
+    const ptraddr_t target_address = (comp_manager_cap_addr >> 12) - (intercept_target >> 12);
+    /*assert(target_address < (2 << 32));*/
+    const int32_t arm_adrp_immlo = (target_address & 0b11) << 29;
+    const int32_t arm_adrp_immhi = (target_address >> 2) <<  5;
+    const int32_t arm_adrp_instr = arm_adrp_instr_mask | arm_adrp_immlo | arm_adrp_immhi | arm_transition_target_register;
+    new_instrs[new_instr_idx++] = arm_adrp_instr;
+
+    // `ldr` capability within compartment pointing to manager capabilities
+    // ldr (unsigned offset, capability, normal base)
+    // `ldr c6, [x6, $OFFSET]`
+    const int32_t arm_ldr_instr_mask = 0b1100001001 << 22; // includes 0b00 bits for `op` field
+    ptraddr_t arm_ldr_pcc_offset = comp_manager_cap_addr; // offset within 4KB page
+    ptraddr_t offset_correction = align_down(comp_manager_cap_addr, 4096);
+    ptraddr_t offset_correction2 = align_down(comp_manager_cap_addr, 1 << 12);
+    arm_ldr_pcc_offset -= offset_correction;
+
+    assert(arm_ldr_pcc_offset < 65520); // from ISA documentation
+    assert(arm_ldr_pcc_offset % 16 == 0);
+    arm_ldr_pcc_offset = arm_ldr_pcc_offset << 10;
+    const int32_t arm_ldr_base_register = arm_transition_target_register << 5; // use `x11` for now
+    const int32_t arm_ldr_dest_register = arm_transition_target_register; // use `c11` for now
+    const int32_t arm_ldr_instr = arm_ldr_instr_mask | arm_ldr_pcc_offset | arm_ldr_base_register | arm_ldr_dest_register;
+    new_instrs[new_instr_idx++] = arm_ldr_instr;
+
+    // `b` instr generation
+    ptraddr_t arm_b_instr_offset = (new_comp->mng_trans_fn - (intercept_target + new_instr_idx * sizeof(uint32_t))) / 4;
+    assert(arm_b_instr_offset < (1 << 27));
+    arm_b_instr_offset &= (1 << 26) - 1;
+    const int32_t arm_b_instr_mask = 0b101 << 26;
+    uintptr_t arm_b_instr = arm_b_instr_mask | arm_b_instr_offset;
+    new_instrs[new_instr_idx++] = arm_b_instr;
+
+    assert(new_instr_idx == INTERCEPT_INSTR_COUNT);
+    struct intercept_patch new_patch;
+    new_patch.patch_addr = (void*) intercept_target;
+    memcpy(new_patch.instr, new_instrs, sizeof(new_instrs));
+    new_patch.comp_manager_cap_addr = comp_manager_cap_addr;
+    new_patch.manager_cap = intercept_data.redirect_cap;
     new_comp->patches[new_comp->curr_intercept_count] = new_patch;
     new_comp->curr_intercept_count += 1;
 }
@@ -310,16 +373,16 @@ comp_map(struct Compartment* to_map)
         }
     }
 
-    printf("Currently mapping compartment scratch memory + stack\n");
+    printf("Currently mapping compartment scratch memory + stack + manager caps area\n");
     map_result = mmap((void*) to_map->scratch_mem_base,
                       to_map->scratch_mem_size,
-                      PROT_READ | PROT_WRITE,
+                      PROT_READ | PROT_WRITE | PROT_EXEC, // TODO Fix this
                       MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS,
                       -1, 0);
     assert(map_result != MAP_FAILED);
     map_result = mmap((void*) to_map->scratch_mem_stack_top - to_map->scratch_mem_stack_size,
                       to_map->scratch_mem_stack_size,
-                      PROT_READ | PROT_WRITE,
+                      PROT_READ | PROT_WRITE | PROT_EXEC, // TODO fix this
                       MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS | MAP_STACK,
                       -1, 0);
     to_map->stack_pointer = to_map->scratch_mem_stack_top;
@@ -333,11 +396,20 @@ comp_map(struct Compartment* to_map)
         *((uintptr_t *) rela_addr) = old_plt_val;
     }
 
+    // Injecting intercepts
     for (size_t i = 0; i < to_map->curr_intercept_count; ++i)
     {
         struct intercept_patch to_patch = to_map->patches[i];
-        *to_patch.patch_addr = to_patch.instr;
+        for (size_t j = 0; j < INTERCEPT_INSTR_COUNT; ++j)
+        {
+            int32_t* curr_addr = to_patch.patch_addr + j;
+            *curr_addr = to_patch.instr[j];
+        }
+        *((void* __capability *) to_patch.comp_manager_cap_addr) =  to_patch.manager_cap;
     }
+
+    // Injecting manager transfer function
+    memcpy((void*) to_map->mng_trans_fn, &compartment_transition_out, to_map->mng_trans_fn_sz);
 
     to_map->mapped = true;
 }
@@ -357,32 +429,10 @@ comp_exec(struct Compartment* to_exec)
 
     int64_t result;
 
-/*#if __has_feature(capabilities)*/
-    /*ddc_set(to_exec->ddc);*/
-/*#endif*/
-
     // TODO handle register clobbering stuff (`syscall-restrict` example)
     // https://github.com/capablevms/cheri_compartments/blob/master/code/signal_break.c#L46
-    // TODO save sp/lr on the compartment stack, and ensure they can't be misused somehow
-    asm("str lr, [sp, #-16]!\n\t"
-        "mov sp, %[comp_sp]\n\t"
-        "ldr c0, %[comp_ddc]\n\t"
-        "msr DDC, c0\n\t"
-        "blr %[fn]\n\t"
-        "ldr c1, %[manager_ddc]\n\t"
-        "msr DDC, c1\n\t" // TODO should fail
-        "ldr x1, %[wrap_sp]\n\t"
-        "mov sp, x1\n\t"
-        "ldr lr, [sp], #16\n\t"
-        "mov %[result], x0"
-         : [wrap_sp]"+m"(wrap_sp), [result]"+r"(result)
-         : [fn]"r"(fn), [comp_sp]"r"(to_exec->stack_pointer),
-           [manager_ddc]"m"(manager_ddc), [comp_ddc]"m"(to_exec->ddc)
-         : "memory");
-/*#if __has_feature(capabilities)*/
-    /*ddc_set(manager_ddc);*/
-/*#endif*/
-    // TODO reset SP
+    result = comp_exec_in((void*) to_exec->stack_pointer, to_exec->ddc, fn);
+
     return result;
 }
 

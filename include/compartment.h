@@ -29,11 +29,19 @@
 // about
 
 struct func_intercept;
+void compartment_transition_out();
+int64_t comp_exec_in(void*, void* __capability, void*);
+void comp_exec_out();
+
+#define INTERCEPT_INSTR_COUNT 5
+#define COMP_TRANS_FN_INSTR_CNT 4
 
 struct intercept_patch
 {
     int* patch_addr;
-    uint32_t instr;
+    int32_t instr[INTERCEPT_INSTR_COUNT];
+    uintptr_t comp_manager_cap_addr;
+    void* __capability manager_cap;
 };
 
 /* Struct representing one segment of an ELF binary.
@@ -79,10 +87,19 @@ struct Compartment
     uintptr_t scratch_mem_base;
     size_t scratch_mem_size;
     size_t scratch_mem_alloc;
+
+    size_t scratch_mem_heap_size;
     uintptr_t scratch_mem_stack_top;
     size_t scratch_mem_stack_size;
     uintptr_t stack_pointer;
     struct mem_alloc* alloc_head;
+
+    uintptr_t manager_caps;
+    size_t max_manager_caps_count;
+    size_t active_manager_caps_count;
+
+    uintptr_t mng_trans_fn;
+    size_t mng_trans_fn_sz;
     // Hardware info - maybe move
     size_t page_size;
     // Misc

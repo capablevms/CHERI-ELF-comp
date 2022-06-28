@@ -32,7 +32,6 @@ manager_insert_new_alloc(struct Compartment* comp, struct mem_alloc* to_insert)
 
     if (comp->alloc_head->ptr > to_insert->ptr)
     {
-        // TODO do we need `to_insert->prev_alloc` set?
         to_insert->next_alloc = comp->alloc_head;
         to_insert->prev_alloc = NULL;
         comp->alloc_head->prev_alloc = to_insert;

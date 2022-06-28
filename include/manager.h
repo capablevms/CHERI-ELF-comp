@@ -15,12 +15,14 @@
  ******************************************************************************/
 
 #define MAX_INTERCEPT_COUNT 4
+#define COMP_RETURN_CAPS_COUNT 2
 
 #include "compartment.h"
 
 #define ENV_FIELDS_CNT 1
 extern const char* comp_env_fields[ENV_FIELDS_CNT];
 extern char** environ;
+extern void* __capability comp_return_caps[COMP_RETURN_CAPS_COUNT];
 
 const char* get_env_str(const char*);
 int manager___vdso_clock_gettime(clockid_t, struct timespec*);
@@ -44,25 +46,31 @@ void my_free(void* ptr);
  * Compartment function intercepts
  ******************************************************************************/
 
-// Intercept functions
-time_t manager_time();
-
 struct func_intercept {
     char* func_name;
     uintptr_t redirect_func;
-    void* __capability intercept_pcc;
     void* __capability intercept_ddc;
+    void* __capability intercept_pcc;
+    void* __capability redirect_cap;
 };
 
+void setup_intercepts();
+void print_full_cap(uintcap_t);
+void intercept_wrapper(void* to_call_fn);
 
-static const struct func_intercept comp_intercept_funcs[] = {
+// Intercept functions
+time_t manager_time();
+
+static const struct func_intercept to_intercept_funcs[] = {
     /* vDSO funcs */
     { "time", (uintptr_t) manager_time },
     //"printf",
     /* Mem funcs */
-    { "malloc", (uintptr_t) my_malloc },
-    { "realloc", (uintptr_t) my_realloc },
-    { "free", (uintptr_t) my_free },
+    //{ "malloc", (uintptr_t) my_malloc },
+    //{ "realloc", (uintptr_t) my_realloc },
+    //{ "free", (uintptr_t) my_free },
 };
+#define INTERCEPT_FUNC_COUNT sizeof(to_intercept_funcs) / sizeof(to_intercept_funcs[0])
+extern struct func_intercept comp_intercept_funcs[INTERCEPT_FUNC_COUNT];
 
 #endif // _MANAGER_H
