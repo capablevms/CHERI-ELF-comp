@@ -14,14 +14,21 @@
  * Compartment
  ******************************************************************************/
 
+// Number of maximum functions to be intercepted
 #define MAX_INTERCEPT_COUNT 4
+
+// Number of capabilities required to perform a transition
 #define COMP_RETURN_CAPS_COUNT 2
 
 #include "compartment.h"
 
+// TODO
 #define ENV_FIELDS_CNT 1
 extern const char* comp_env_fields[ENV_FIELDS_CNT];
 extern char** environ;
+
+// Capabilities required to transition back into the manager once compartment
+// execution has finished
 extern void* __capability comp_return_caps[COMP_RETURN_CAPS_COUNT];
 
 const char* get_env_str(const char*);
@@ -46,6 +53,8 @@ void my_free(void* ptr);
  * Compartment function intercepts
  ******************************************************************************/
 
+/* Data required to perform the transition for an intercepted function
+ */
 struct func_intercept {
     char* func_name;
     uintptr_t redirect_func;
@@ -70,6 +79,8 @@ static const struct func_intercept to_intercept_funcs[] = {
     //{ "realloc", (uintptr_t) my_realloc },
     //{ "free", (uintptr_t) my_free },
 };
+
+// Functions to be intercepted and associated data
 #define INTERCEPT_FUNC_COUNT sizeof(to_intercept_funcs) / sizeof(to_intercept_funcs[0])
 extern struct func_intercept comp_intercept_funcs[INTERCEPT_FUNC_COUNT];
 

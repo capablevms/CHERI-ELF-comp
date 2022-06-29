@@ -20,6 +20,10 @@ get_env_str(const char* env_name)
 
 /*******************************************************************************
  * Intercept functions
+ *
+ * These functions are meant to be executed within a manager context, by
+ * intercepting certain functions within compartments which must have higher
+ * privlige
  ******************************************************************************/
 
 time_t

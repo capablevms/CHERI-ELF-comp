@@ -3,6 +3,9 @@
 static size_t comps_id = 0;
 struct Compartment** comps;
 
+/* Initialize some values of the Compartment struct. The rest are expected to
+ * be set in `comp_from_elf`.
+ */
 struct Compartment*
 comp_init()
 {
@@ -38,6 +41,9 @@ comp_init()
  * Main compartment functions
  ******************************************************************************/
 
+/* Give a binary ELF file in `filename`, read the ELF data and store it within
+ * a `struct Compartment`. At this point, we only read data.
+ */
 struct Compartment*
 comp_from_elf(char* filename)
 {
@@ -142,6 +148,8 @@ comp_from_elf(char* filename)
     assert((new_comp->scratch_mem_stack_top - new_comp->scratch_mem_stack_size) % 16 == 0);
     assert(new_comp->scratch_mem_size % 16 == 0);
 
+    // Find functions of interest, particularly entry points, and functions to
+    // intercept
     Elf64_Shdr comp_symtb_hdr; // TODO change name
     size_t found = 0;
     for (size_t i = 0; i < comp_ehdr.e_shnum; ++i)
@@ -250,6 +258,13 @@ comp_register_ddc(struct Compartment* new_comp)
     new_comp->ddc = new_ddc;
 }
 
+/* For a given Compartment `new_comp`, an address `intercept_target` pointing
+ * to a function found within the compartment which we would like to intercept,
+ * and a `intercept_data` struct representing information to perform the
+ * intercept, synthesize and inject intructions at the call point of the
+ * `intercept_target`, in order to perform a transition out of the compartment
+ * to call the appropriate function with higher privileges.
+ */
 void
 comp_add_intercept(struct Compartment* new_comp, uintptr_t intercept_target, struct func_intercept intercept_data)
 {
@@ -337,6 +352,8 @@ comp_stack_auxval_push(struct Compartment* comp, uint64_t at_type, uint64_t at_v
     comp_stack_push(comp, &new_auxv, sizeof(new_auxv));
 }
 
+/* Map a struct Compartment into memory, making it ready for execution
+ */
 void
 comp_map(struct Compartment* to_map)
 {
@@ -396,7 +413,7 @@ comp_map(struct Compartment* to_map)
         *((uintptr_t *) rela_addr) = old_plt_val;
     }
 
-    // Injecting intercepts
+    // Inject intercept instructions within identified intercepted functions
     for (size_t i = 0; i < to_map->curr_intercept_count; ++i)
     {
         struct intercept_patch to_patch = to_map->patches[i];
@@ -408,7 +425,7 @@ comp_map(struct Compartment* to_map)
         *((void* __capability *) to_patch.comp_manager_cap_addr) =  to_patch.manager_cap;
     }
 
-    // Injecting manager transfer function
+    // Inject manager transfer function
     memcpy((void*) to_map->mng_trans_fn, &compartment_transition_out, to_map->mng_trans_fn_sz);
 
     to_map->mapped = true;
@@ -419,12 +436,19 @@ void ddc_set(void *__capability cap) {
     asm volatile("MSR DDC, %[cap]" : : [cap] "C"(cap) : "memory");
 }
 
+/* Execute a mapped compartment, by jumping to the appropriate entry point.
+ *
+ * TODO the entry point is currently only the `main` function of a compartment
+ */
 int64_t
 comp_exec(struct Compartment* to_exec)
 {
+    assert(to_exec->mapped && "Attempting to execute an unmapped compartment.\n");
     void* fn = (void*) to_exec->entry_point;
     void* wrap_sp;
 
+    // TODO check if we still need this
+    // https://git.morello-project.org/morello/kernel/linux/-/wikis/Morello-pure-capability-kernel-user-Linux-ABI-specification
     /*setup_stack(to_exec);*/
 
     int64_t result;
