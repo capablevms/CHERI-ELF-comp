@@ -3,6 +3,9 @@
 static size_t comps_id = 0;
 struct Compartment** comps;
 
+/* Initialize some values of the Compartment struct. The rest are expected to
+ * be set in `comp_from_elf`.
+ */
 struct Compartment*
 comp_init()
 {
@@ -38,6 +41,9 @@ comp_init()
  * Main compartment functions
  ******************************************************************************/
 
+/* Give a binary ELF file in `filename`, read the ELF data and store it within
+ * a `struct Compartment`. At this point, we only read data.
+ */
 struct Compartment*
 comp_from_elf(char* filename)
 {
@@ -142,6 +148,8 @@ comp_from_elf(char* filename)
     assert((new_comp->scratch_mem_stack_top - new_comp->scratch_mem_stack_size) % 16 == 0);
     assert(new_comp->scratch_mem_size % 16 == 0);
 
+    // Find functions of interest, particularly entry points, and functions to
+    // intercept
     Elf64_Shdr comp_symtb_hdr; // TODO change name
     size_t found = 0;
     for (size_t i = 0; i < comp_ehdr.e_shnum; ++i)
@@ -250,6 +258,13 @@ comp_register_ddc(struct Compartment* new_comp)
     new_comp->ddc = new_ddc;
 }
 
+/* For a given Compartment `new_comp`, an address `intercept_target` pointing
+ * to a function found within the compartment which we would like to intercept,
+ * and a `intercept_data` struct representing information to perform the
+ * intercept, synthesize and inject intructions at the call point of the
+ * `intercept_target`, in order to perform a transition out of the compartment
+ * to call the appropriate function with higher privileges.
+ */
 void
 comp_add_intercept(struct Compartment* new_comp, uintptr_t intercept_target, struct func_intercept intercept_data)
 {
@@ -262,11 +277,13 @@ comp_add_intercept(struct Compartment* new_comp, uintptr_t intercept_target, str
     const int32_t arm_function_target_register = 0b01010; // use `x10` for now
     const int32_t arm_transition_target_register = 0b01011; // use `x11` for now
 
+    // TODO ideally we want 1 `movz` and 3 `movk`, to be able to access any
+    // address, but this is sufficient for now
     // movz x0, $target_fn_addr:lo16
     // movk x0, $target_fn_addr:hi16
-    /*assert(intercept_target < (1 << 32));*/
-    const int32_t arm_movz_instr_mask = 0b11010010100 << 21;
-    const int32_t arm_movk_instr_mask = 0b11110010101 << 21;
+    assert(intercept_target < ((ptraddr_t) 1 << 32));
+    const uint32_t arm_movz_instr_mask = 0b11010010100 << 21;
+    const uint32_t arm_movk_instr_mask = 0b11110010101 << 21;
     const ptraddr_t target_address_lo16 = (intercept_data.redirect_func & ((1 << 16) - 1)) << 5;
     const ptraddr_t target_address_hi16 = (intercept_data.redirect_func >> 16) << 5;
     const int32_t arm_movz_intr = arm_movz_instr_mask | target_address_lo16 | arm_function_target_register;
@@ -279,9 +296,9 @@ comp_add_intercept(struct Compartment* new_comp, uintptr_t intercept_target, str
     // TODO what if we need to jump more than 4GB away?
     // Use `adrp` to get address close to address of manager capability required
     // adrp x11, $OFFSET
-    const int32_t arm_adrp_instr_mask = 0b10010000 << 24;
+    const uint32_t arm_adrp_instr_mask = 0b10010000 << 24;
     const ptraddr_t target_address = (comp_manager_cap_addr >> 12) - (intercept_target >> 12);
-    /*assert(target_address < (2 << 32));*/
+    assert(target_address < ((ptraddr_t) 1 << 32));
     const int32_t arm_adrp_immlo = (target_address & 0b11) << 29;
     const int32_t arm_adrp_immhi = (target_address >> 2) <<  5;
     const int32_t arm_adrp_instr = arm_adrp_instr_mask | arm_adrp_immlo | arm_adrp_immhi | arm_transition_target_register;
@@ -289,11 +306,10 @@ comp_add_intercept(struct Compartment* new_comp, uintptr_t intercept_target, str
 
     // `ldr` capability within compartment pointing to manager capabilities
     // ldr (unsigned offset, capability, normal base)
-    // `ldr c6, [x6, $OFFSET]`
-    const int32_t arm_ldr_instr_mask = 0b1100001001 << 22; // includes 0b00 bits for `op` field
+    // `ldr c11, [x11, $OFFSET]`
+    const uint32_t arm_ldr_instr_mask = 0b1100001001 << 22; // includes 0b00 bits for `op` field
     ptraddr_t arm_ldr_pcc_offset = comp_manager_cap_addr; // offset within 4KB page
-    ptraddr_t offset_correction = align_down(comp_manager_cap_addr, 4096);
-    ptraddr_t offset_correction2 = align_down(comp_manager_cap_addr, 1 << 12);
+    ptraddr_t offset_correction = align_down(comp_manager_cap_addr, 1 << 12);
     arm_ldr_pcc_offset -= offset_correction;
 
     assert(arm_ldr_pcc_offset < 65520); // from ISA documentation
@@ -308,7 +324,7 @@ comp_add_intercept(struct Compartment* new_comp, uintptr_t intercept_target, str
     ptraddr_t arm_b_instr_offset = (new_comp->mng_trans_fn - (intercept_target + new_instr_idx * sizeof(uint32_t))) / 4;
     assert(arm_b_instr_offset < (1 << 27));
     arm_b_instr_offset &= (1 << 26) - 1;
-    const int32_t arm_b_instr_mask = 0b101 << 26;
+    const uint32_t arm_b_instr_mask = 0b101 << 26;
     uintptr_t arm_b_instr = arm_b_instr_mask | arm_b_instr_offset;
     new_instrs[new_instr_idx++] = arm_b_instr;
 
@@ -316,6 +332,7 @@ comp_add_intercept(struct Compartment* new_comp, uintptr_t intercept_target, str
     struct intercept_patch new_patch;
     new_patch.patch_addr = (void*) intercept_target;
     memcpy(new_patch.instr, new_instrs, sizeof(new_instrs));
+    __clear_cache(new_patch.instr, new_patch.instr + sizeof(new_instrs));
     new_patch.comp_manager_cap_addr = comp_manager_cap_addr;
     new_patch.manager_cap = intercept_data.redirect_cap;
     new_comp->patches[new_comp->curr_intercept_count] = new_patch;
@@ -337,6 +354,8 @@ comp_stack_auxval_push(struct Compartment* comp, uint64_t at_type, uint64_t at_v
     comp_stack_push(comp, &new_auxv, sizeof(new_auxv));
 }
 
+/* Map a struct Compartment into memory, making it ready for execution
+ */
 void
 comp_map(struct Compartment* to_map)
 {
@@ -396,7 +415,7 @@ comp_map(struct Compartment* to_map)
         *((uintptr_t *) rela_addr) = old_plt_val;
     }
 
-    // Injecting intercepts
+    // Inject intercept instructions within identified intercepted functions
     for (size_t i = 0; i < to_map->curr_intercept_count; ++i)
     {
         struct intercept_patch to_patch = to_map->patches[i];
@@ -405,10 +424,10 @@ comp_map(struct Compartment* to_map)
             int32_t* curr_addr = to_patch.patch_addr + j;
             *curr_addr = to_patch.instr[j];
         }
-        *((void* __capability *) to_patch.comp_manager_cap_addr) =  to_patch.manager_cap;
+        *((void* __capability *) to_patch.comp_manager_cap_addr) = to_patch.manager_cap;
     }
 
-    // Injecting manager transfer function
+    // Inject manager transfer function
     memcpy((void*) to_map->mng_trans_fn, &compartment_transition_out, to_map->mng_trans_fn_sz);
 
     to_map->mapped = true;
@@ -419,12 +438,19 @@ void ddc_set(void *__capability cap) {
     asm volatile("MSR DDC, %[cap]" : : [cap] "C"(cap) : "memory");
 }
 
+/* Execute a mapped compartment, by jumping to the appropriate entry point.
+ *
+ * TODO the entry point is currently only the `main` function of a compartment
+ */
 int64_t
 comp_exec(struct Compartment* to_exec)
 {
+    assert(to_exec->mapped && "Attempting to execute an unmapped compartment.\n");
     void* fn = (void*) to_exec->entry_point;
     void* wrap_sp;
 
+    // TODO check if we still need this
+    // https://git.morello-project.org/morello/kernel/linux/-/wikis/Morello-pure-capability-kernel-user-Linux-ABI-specification
     /*setup_stack(to_exec);*/
 
     int64_t result;

@@ -33,9 +33,20 @@ void compartment_transition_out();
 int64_t comp_exec_in(void*, void* __capability, void*);
 void comp_exec_out();
 
+// Declare built-in function for cache synchronization:
+// https://community.arm.com/arm-community-blogs/b/architectures-and-processors-blog/posts/caches-and-self-modifying-code
+extern void __clear_cache(void*, void*);
+
+// Number of instructions to inject at intercepted function call point
+// TODO ensure there is sufficient space for these, so we don't spill over
 #define INTERCEPT_INSTR_COUNT 5
+
+// Number of instructions required by the transition function
 #define COMP_TRANS_FN_INSTR_CNT 4
 
+/* For a function to be intercepted, information required to insert the
+ * redirect code and perform redirection
+ */
 struct intercept_patch
 {
     int* patch_addr;
@@ -58,6 +69,9 @@ struct SegmentMap
     int prot_flags;
 };
 
+/* Struct representing ELF data necessary to load and eventually execute a
+ * compartment
+ */
 struct Compartment
 {
     // Identifiers
@@ -104,8 +118,7 @@ struct Compartment
     size_t page_size;
     // Misc
     short curr_intercept_count;
-    struct intercept_patch patches[MAX_INTERCEPT_COUNT];
-
+    struct intercept_patch patches[INTERCEPT_FUNC_COUNT];
 };
 
 extern struct Compartment** comps;

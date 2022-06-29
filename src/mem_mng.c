@@ -2,6 +2,13 @@
 
 // MEM TODO
 
+/* An initial design of a simple bump allocator. This is here more to have
+ * something intercept `malloc` calls from the compartment, and might be
+ * scrapped in favour of something useful. The only requirement is that we are
+ * able to restrict what area of the memory we want to manage to the
+ * compartment scratch memory space
+ */
+
 void*
 manager_register_mem_alloc(struct Compartment* comp, size_t mem_size)
 {
