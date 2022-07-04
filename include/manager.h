@@ -65,6 +65,11 @@ struct func_intercept {
 
 void setup_intercepts();
 void print_full_cap(uintcap_t);
+
+// This function expects the argument be passed in `x10`, rather than `x0`. It
+// is expected to be called only in very specific circumstances, and the
+// signature is more illustrative than functional. As such, it shouldn't be
+// called from a C context, as that will most likely break things.
 void intercept_wrapper(void* to_call_fn);
 
 // Intercept functions

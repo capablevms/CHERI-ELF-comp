@@ -25,7 +25,7 @@ intercept_wrapper:
 .type compartment_transition_out, "function"
 compartment_transition_out:
     stp c29, clr, [sp, #-32]!
-    ldpblr c29, [c11] // TODO save c11?
+    ldpblr c29, [c11]
     ldp c29, clr, [sp], #32
     ret
 compartment_transition_out_end:
