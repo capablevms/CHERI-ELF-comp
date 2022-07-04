@@ -279,7 +279,7 @@ comp_add_intercept(struct Compartment* new_comp, uintptr_t intercept_target, str
 
     // movz x0, $target_fn_addr:lo16
     // movk x0, $target_fn_addr:hi16
-    assert(intercept_target < (1 << 32));
+    assert(intercept_target < ((ptraddr_t) 1 << 32));
     const int32_t arm_movz_instr_mask = 0b11010010100 << 21;
     const int32_t arm_movk_instr_mask = 0b11110010101 << 21;
     const ptraddr_t target_address_lo16 = (intercept_data.redirect_func & ((1 << 16) - 1)) << 5;
@@ -296,7 +296,7 @@ comp_add_intercept(struct Compartment* new_comp, uintptr_t intercept_target, str
     // adrp x11, $OFFSET
     const int32_t arm_adrp_instr_mask = 0b10010000 << 24;
     const ptraddr_t target_address = (comp_manager_cap_addr >> 12) - (intercept_target >> 12);
-    assert(target_address < (1 << 32));
+    assert(target_address < ((ptraddr_t) 1 << 32));
     const int32_t arm_adrp_immlo = (target_address & 0b11) << 29;
     const int32_t arm_adrp_immhi = (target_address >> 2) <<  5;
     const int32_t arm_adrp_instr = arm_adrp_instr_mask | arm_adrp_immlo | arm_adrp_immhi | arm_transition_target_register;
