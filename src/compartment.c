@@ -280,8 +280,8 @@ comp_add_intercept(struct Compartment* new_comp, uintptr_t intercept_target, str
     // movz x0, $target_fn_addr:lo16
     // movk x0, $target_fn_addr:hi16
     assert(intercept_target < ((ptraddr_t) 1 << 32));
-    const int32_t arm_movz_instr_mask = 0b11010010100 << 21;
-    const int32_t arm_movk_instr_mask = 0b11110010101 << 21;
+    const uint32_t arm_movz_instr_mask = 0b11010010100 << 21;
+    const uint32_t arm_movk_instr_mask = 0b11110010101 << 21;
     const ptraddr_t target_address_lo16 = (intercept_data.redirect_func & ((1 << 16) - 1)) << 5;
     const ptraddr_t target_address_hi16 = (intercept_data.redirect_func >> 16) << 5;
     const int32_t arm_movz_intr = arm_movz_instr_mask | target_address_lo16 | arm_function_target_register;
@@ -294,7 +294,7 @@ comp_add_intercept(struct Compartment* new_comp, uintptr_t intercept_target, str
     // TODO what if we need to jump more than 4GB away?
     // Use `adrp` to get address close to address of manager capability required
     // adrp x11, $OFFSET
-    const int32_t arm_adrp_instr_mask = 0b10010000 << 24;
+    const uint32_t arm_adrp_instr_mask = 0b10010000 << 24;
     const ptraddr_t target_address = (comp_manager_cap_addr >> 12) - (intercept_target >> 12);
     assert(target_address < ((ptraddr_t) 1 << 32));
     const int32_t arm_adrp_immlo = (target_address & 0b11) << 29;
@@ -305,7 +305,7 @@ comp_add_intercept(struct Compartment* new_comp, uintptr_t intercept_target, str
     // `ldr` capability within compartment pointing to manager capabilities
     // ldr (unsigned offset, capability, normal base)
     // `ldr c11, [x11, $OFFSET]`
-    const int32_t arm_ldr_instr_mask = 0b1100001001 << 22; // includes 0b00 bits for `op` field
+    const uint32_t arm_ldr_instr_mask = 0b1100001001 << 22; // includes 0b00 bits for `op` field
     ptraddr_t arm_ldr_pcc_offset = comp_manager_cap_addr; // offset within 4KB page
     ptraddr_t offset_correction = align_down(comp_manager_cap_addr, 1 << 12);
     arm_ldr_pcc_offset -= offset_correction;
@@ -322,7 +322,7 @@ comp_add_intercept(struct Compartment* new_comp, uintptr_t intercept_target, str
     ptraddr_t arm_b_instr_offset = (new_comp->mng_trans_fn - (intercept_target + new_instr_idx * sizeof(uint32_t))) / 4;
     assert(arm_b_instr_offset < (1 << 27));
     arm_b_instr_offset &= (1 << 26) - 1;
-    const int32_t arm_b_instr_mask = 0b101 << 26;
+    const uint32_t arm_b_instr_mask = 0b101 << 26;
     uintptr_t arm_b_instr = arm_b_instr_mask | arm_b_instr_offset;
     new_instrs[new_instr_idx++] = arm_b_instr;
 
