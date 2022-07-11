@@ -277,6 +277,8 @@ comp_add_intercept(struct Compartment* new_comp, uintptr_t intercept_target, str
     const int32_t arm_function_target_register = 0b01010; // use `x10` for now
     const int32_t arm_transition_target_register = 0b01011; // use `x11` for now
 
+    // TODO ideally we want 1 `movz` and 3 `movk`, to be able to access any
+    // address, but this is sufficient for now
     // movz x0, $target_fn_addr:lo16
     // movk x0, $target_fn_addr:hi16
     assert(intercept_target < ((ptraddr_t) 1 << 32));
