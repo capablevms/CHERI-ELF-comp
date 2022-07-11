@@ -332,6 +332,7 @@ comp_add_intercept(struct Compartment* new_comp, uintptr_t intercept_target, str
     struct intercept_patch new_patch;
     new_patch.patch_addr = (void*) intercept_target;
     memcpy(new_patch.instr, new_instrs, sizeof(new_instrs));
+    __clear_cache(new_patch.instr, new_patch.instr + sizeof(new_instrs));
     new_patch.comp_manager_cap_addr = comp_manager_cap_addr;
     new_patch.manager_cap = intercept_data.redirect_cap;
     new_comp->patches[new_comp->curr_intercept_count] = new_patch;

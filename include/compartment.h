@@ -33,6 +33,10 @@ void compartment_transition_out();
 int64_t comp_exec_in(void*, void* __capability, void*);
 void comp_exec_out();
 
+// Declare built-in function for cache synchronization:
+// https://community.arm.com/arm-community-blogs/b/architectures-and-processors-blog/posts/caches-and-self-modifying-code
+extern void __clear_cacher(char*, char*);
+
 // Number of instructions to inject at intercepted function call point
 // TODO ensure there is sufficient space for these, so we don't spill over
 #define INTERCEPT_INSTR_COUNT 5
