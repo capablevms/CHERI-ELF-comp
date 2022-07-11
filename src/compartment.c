@@ -304,7 +304,7 @@ comp_add_intercept(struct Compartment* new_comp, uintptr_t intercept_target, str
 
     // `ldr` capability within compartment pointing to manager capabilities
     // ldr (unsigned offset, capability, normal base)
-    // `ldr c6, [x6, $OFFSET]`
+    // `ldr c11, [x11, $OFFSET]`
     const int32_t arm_ldr_instr_mask = 0b1100001001 << 22; // includes 0b00 bits for `op` field
     ptraddr_t arm_ldr_pcc_offset = comp_manager_cap_addr; // offset within 4KB page
     ptraddr_t offset_correction = align_down(comp_manager_cap_addr, 1 << 12);
