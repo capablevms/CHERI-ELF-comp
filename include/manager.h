@@ -63,39 +63,35 @@ extern struct func_intercept comp_intercept_funcs[INTERCEPT_FUNC_COUNT];
 
 void print_full_cap(uintcap_t);
 
-
 /*******************************************************************************
  * Compartment
  ******************************************************************************/
 
-// Number of maximum functions to be intercepted
-#define MAX_INTERCEPT_COUNT 4
-
 // Number of capabilities required to perform a transition
 #define COMP_RETURN_CAPS_COUNT 2
-
-#include "compartment.h"
-
-// TODO
-#define ENV_FIELDS_CNT 1
-extern const char* comp_env_fields[ENV_FIELDS_CNT];
-extern char** environ;
 
 // Capabilities required to transition back into the manager once compartment
 // execution has finished
 extern void* __capability comp_return_caps[COMP_RETURN_CAPS_COUNT];
 
-const char* get_env_str(const char*);
-int manager___vdso_clock_gettime(clockid_t, struct timespec*);
-
 struct Compartment* manager_find_compartment_by_addr(void*);
 struct Compartment* manager_find_compartment_by_ddc(void* __capability);
+
+#include "compartment.h"
+
+// TODO stack setup when we transition into the compartment; unsure if needed,
+// but keep for now, just in case
+#define ENV_FIELDS_CNT 1
+extern const char* comp_env_fields[ENV_FIELDS_CNT];
+extern char** environ;
+const char* get_env_str(const char*);
+int manager___vdso_clock_gettime(clockid_t, struct timespec*);
+// END TODO
 
 /*******************************************************************************
  * Memory allocation
  ******************************************************************************/
 
 #include "mem_mng.h"
-
 
 #endif // _MANAGER_H
