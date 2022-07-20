@@ -35,7 +35,7 @@ void comp_exec_out();
 
 // Declare built-in function for cache synchronization:
 // https://community.arm.com/arm-community-blogs/b/architectures-and-processors-blog/posts/caches-and-self-modifying-code
-extern void __clear_cache(char*, char*);
+extern void __clear_cache(void*, void*);
 
 // Number of instructions to inject at intercepted function call point
 // TODO ensure there is sufficient space for these, so we don't spill over
