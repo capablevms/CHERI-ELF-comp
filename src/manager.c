@@ -64,6 +64,16 @@ my_free(void* ptr)
     return;
 }
 
+int
+my_fprintf(FILE* stream, const char* format, ...)
+{
+    va_list va_args;
+    va_start(va_args, format);
+    int res = vfprintf(stream, format, va_args);
+    va_end(va_args);
+    return res;
+}
+
 /*******************************************************************************
  * Utility functions
  ******************************************************************************/

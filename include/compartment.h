@@ -35,7 +35,7 @@ void comp_exec_out();
 
 // Declare built-in function for cache synchronization:
 // https://community.arm.com/arm-community-blogs/b/architectures-and-processors-blog/posts/caches-and-self-modifying-code
-extern void __clear_cacher(char*, char*);
+extern void __clear_cache(char*, char*);
 
 // Number of instructions to inject at intercepted function call point
 // TODO ensure there is sufficient space for these, so we don't spill over
@@ -118,8 +118,7 @@ struct Compartment
     size_t page_size;
     // Misc
     short curr_intercept_count;
-    struct intercept_patch patches[MAX_INTERCEPT_COUNT];
-
+    struct intercept_patch patches[INTERCEPT_FUNC_COUNT];
 };
 
 extern struct Compartment** comps;
