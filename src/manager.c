@@ -99,8 +99,14 @@ setup_intercepts()
         comp_intercept_funcs[i].func_name = to_intercept_funcs[i].func_name;
         comp_intercept_funcs[i].redirect_func = to_intercept_funcs[i].redirect_func;
         comp_intercept_funcs[i].intercept_ddc = manager_ddc;
-        comp_intercept_funcs[i].intercept_pcc = cheri_address_set(cheri_pcc_get(), (uintptr_t) intercept_wrapper);
-        comp_intercept_funcs[i].redirect_cap = cheri_address_set(manager_ddc, (uintptr_t) &comp_intercept_funcs[i].intercept_ddc);
+        comp_intercept_funcs[i].intercept_pcc =
+            cheri_address_set(cheri_pcc_get(), (uintptr_t) intercept_wrapper);
+        void* __capability sealed_redirect_cap =
+            cheri_address_set(manager_ddc, (uintptr_t) &comp_intercept_funcs[i].intercept_ddc);
+        asm("SEAL %[cap], %[cap], lpb\n\t"
+                : [cap]"+r"(sealed_redirect_cap)
+                : /**/ );
+        comp_intercept_funcs[i].redirect_cap = sealed_redirect_cap;
         print_full_cap((uintcap_t) comp_intercept_funcs[i].redirect_cap);
     }
     comp_return_caps[0] = manager_ddc;

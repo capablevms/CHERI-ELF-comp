@@ -424,7 +424,7 @@ comp_map(struct Compartment* to_map)
             int32_t* curr_addr = to_patch.patch_addr + j;
             *curr_addr = to_patch.instr[j];
         }
-        *((void* __capability *) to_patch.comp_manager_cap_addr) =  to_patch.manager_cap;
+        *((void* __capability *) to_patch.comp_manager_cap_addr) = to_patch.manager_cap;
     }
 
     // Inject manager transfer function
