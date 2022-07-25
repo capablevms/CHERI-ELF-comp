@@ -32,3 +32,4 @@ endfunction()
 
 new_proj_test(simple TRUE)
 new_proj_test(test_map FALSE)
+new_proj_test(time TRUE)

@@ -1,8 +1,10 @@
 #include "manager.h"
 
 const char* comp_env_fields[] = { "PATH", };
+void* __capability comp_return_caps[COMP_RETURN_CAPS_COUNT];
 void* __capability manager_ddc = NULL;
 struct Compartment* loaded_comp = NULL; // TODO
+struct func_intercept comp_intercept_funcs[INTERCEPT_FUNC_COUNT];
 
 const char*
 get_env_str(const char* env_name)
@@ -15,6 +17,14 @@ get_env_str(const char* env_name)
     }
     return NULL;
 }
+
+/*******************************************************************************
+ * Intercept functions
+ *
+ * These functions are meant to be executed within a manager context, by
+ * intercepting certain functions within compartments which must have higher
+ * privlige
+ ******************************************************************************/
 
 time_t
 manager_time(time_t* t)
@@ -52,6 +62,55 @@ my_free(void* ptr)
     struct Compartment* comp = manager_find_compartment_by_ddc(cheri_ddc_get());
     manager_free_mem_alloc(comp, ptr); // TODO
     return;
+}
+
+int
+my_fprintf(FILE* stream, const char* format, ...)
+{
+    va_list va_args;
+    va_start(va_args, format);
+    int res = vfprintf(stream, format, va_args);
+    va_end(va_args);
+    return res;
+}
+
+/*******************************************************************************
+ * Utility functions
+ ******************************************************************************/
+
+void print_full_cap(uintcap_t cap) {
+    uint32_t words[4];  // Hack to demonstrate! In real code, be more careful about sizes, etc.
+    printf("0x%d", cheri_tag_get(cap) ? 1 : 0);
+    memcpy(words, &cap, sizeof(cap));
+    for (int i = 3; i >= 0; i--) {
+        printf("_%08x", words[i]);
+    }
+    printf("\n");
+}
+
+/* Setup required capabilities on the heap to jump from within compartments via
+ * a context switch
+ */
+void
+setup_intercepts()
+{
+    for (size_t i = 0; i < sizeof(to_intercept_funcs) / sizeof(to_intercept_funcs[0]); ++i)
+    {
+        comp_intercept_funcs[i].func_name = to_intercept_funcs[i].func_name;
+        comp_intercept_funcs[i].redirect_func = to_intercept_funcs[i].redirect_func;
+        comp_intercept_funcs[i].intercept_ddc = manager_ddc;
+        comp_intercept_funcs[i].intercept_pcc =
+            cheri_address_set(cheri_pcc_get(), (uintptr_t) intercept_wrapper);
+        void* __capability sealed_redirect_cap =
+            cheri_address_set(manager_ddc, (uintptr_t) &comp_intercept_funcs[i].intercept_ddc);
+        asm("SEAL %[cap], %[cap], lpb\n\t"
+                : [cap]"+r"(sealed_redirect_cap)
+                : /**/ );
+        comp_intercept_funcs[i].redirect_cap = sealed_redirect_cap;
+        print_full_cap((uintcap_t) comp_intercept_funcs[i].redirect_cap);
+    }
+    comp_return_caps[0] = manager_ddc;
+    comp_return_caps[1] = cheri_address_set(cheri_pcc_get(), (uintptr_t) comp_exec_out);
 }
 
 struct Compartment*
