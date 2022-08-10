@@ -1,5 +1,4 @@
 #include "manager.h"
-#include "limits.h"
 
 extern struct Compartment* loaded_comp;
 

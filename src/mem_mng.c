@@ -13,16 +13,12 @@ void*
 manager_register_mem_alloc(struct Compartment* comp, size_t mem_size)
 {
     // TODO better algorithm to find blocks of memory available for mapping
-    void* new_mem = mmap((void*) (comp->scratch_mem_base + comp->scratch_mem_alloc),
-                         mem_size,
-                         PROT_READ | PROT_WRITE,
-                         MAP_PRIVATE | MAP_ANONYMOUS,
-                         -1, 0);
-
+    void* new_mem = (void*) (comp->scratch_mem_base + comp->scratch_mem_alloc);
     struct mem_alloc* new_alloc = malloc(sizeof(struct mem_alloc));
     new_alloc->ptr = (uintptr_t) new_mem;
     new_alloc->size = mem_size;
     manager_insert_new_alloc(comp, new_alloc);
+    comp->scratch_mem_alloc += __builtin_align_up(mem_size, sizeof(void*));
     return new_mem;
 }
 
@@ -76,8 +72,6 @@ manager_free_mem_alloc(struct Compartment* comp, void* ptr)
     }
 
     assert(curr_alloc != NULL && "Memory allocation not found to be freed.");
-    size_t munmap_res = munmap((void*) curr_alloc->ptr, curr_alloc->size);
-    assert(munmap_res == 0);
     if (curr_alloc->prev_alloc != NULL)
     {
         curr_alloc->prev_alloc->next_alloc = curr_alloc->next_alloc;
@@ -88,7 +82,35 @@ manager_free_mem_alloc(struct Compartment* comp, void* ptr)
     }
     size_t to_return = curr_alloc->size;
     free(curr_alloc);
-    // TODO subtract allocated memory
 
     return to_return;
+}
+
+/**
+ * Find allocation record in a compartment for a given address
+ *
+ * Given a compartment and an address, iterates over the memory allocations
+ * recorded for that compartment in order to find the allocation record
+ * refering to the given address.
+ * This currently expects the allocation record to exactly point to a given
+ * address to be searched, due to how the memory allocator is designed.
+ *
+ * \param comp Compartment in which we expect the allocation to exist
+ * \param ptr Address to search for
+ * \return A record indicating the requested memory allocation
+ */
+struct mem_alloc*
+get_alloc_struct_from_ptr(struct Compartment* comp, uintptr_t ptr)
+{
+    struct mem_alloc* curr_alloc = comp->alloc_head;
+    while(curr_alloc->next_alloc != NULL)
+    {
+        if (curr_alloc->ptr == ptr)
+        {
+            return curr_alloc;
+        }
+        curr_alloc = curr_alloc->next_alloc;
+    }
+    printf("ERROR: Could not find allocated pointer %Pu!\n", ptr);
+    assert(false);
 }
