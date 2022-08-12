@@ -30,7 +30,7 @@ function(new_proj_lua_test test_name)
     target_compile_options(${test_name} PRIVATE -static)
     target_link_options(${test_name} PRIVATE -static "LINKER:-image-base=0x1000000")
     add_test(NAME ${test_name}
-             COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.sh $<TARGET_FILE:${test_name}>)
+             COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.sh $<TARGET_FILE:${test_name}> ${ARGV2})
 endfunction()
 
 # Library tests
@@ -41,3 +41,4 @@ new_proj_test(time TRUE)
 new_proj_test(test_map FALSE)
 
 new_proj_lua_test(lua_simple)
+new_proj_lua_test(lua_script ${TEST_DIR}/hello_world.lua)
