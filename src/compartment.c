@@ -66,7 +66,6 @@ comp_from_elf(char* filename)
     struct stat elf_fd_stat;
     fstat(new_comp->fd, &elf_fd_stat);
     new_comp->size = elf_fd_stat.st_size;
-    /*new_comp->entry_point = new_comp_base + comp_ehdr.e_entry;*/
     new_comp->phentsize = comp_ehdr.e_phentsize;
     new_comp->phnum = comp_ehdr.e_phnum;
 
@@ -120,8 +119,6 @@ comp_from_elf(char* filename)
         this_seg->prot_flags = (comp_phdr.p_flags & PF_R ? PROT_READ : 0) |
                                 (comp_phdr.p_flags & PF_W ? PROT_WRITE : 0) |
                                 (comp_phdr.p_flags & PF_X ? PROT_EXEC : 0);
-        printf("Added segment for header %lu:\n", i);
-        segmap_print(this_seg);
 
         new_comp->segs[new_comp->seg_count] = this_seg;
         new_comp->seg_count += 1;
@@ -131,14 +128,14 @@ comp_from_elf(char* filename)
     // Define scratch memory available
     new_comp->scratch_mem_base = align_up(new_comp->segs[new_comp->seg_count - 1]->mem_top + new_comp->page_size, new_comp->page_size);
     new_comp->max_manager_caps_count = 10; // TODO
-    new_comp->scratch_mem_heap_size = 0x40000UL;
+    new_comp->scratch_mem_heap_size = 0x800000UL;
     new_comp->scratch_mem_size =
             new_comp->scratch_mem_heap_size +
             new_comp->max_manager_caps_count * sizeof(void* __capability) +
             new_comp->mng_trans_fn_sz;;
     new_comp->scratch_mem_alloc = 0;
     new_comp->scratch_mem_stack_top = align_down(new_comp->scratch_mem_base + new_comp->scratch_mem_heap_size, 16);
-    new_comp->scratch_mem_stack_size = 0x8000UL;
+    new_comp->scratch_mem_stack_size = 0x80000UL;
     new_comp->manager_caps = new_comp->scratch_mem_stack_top;
     new_comp->active_manager_caps_count = 0;
     new_comp->mng_trans_fn = new_comp->manager_caps + new_comp->max_manager_caps_count * sizeof(void* __capability);
@@ -196,7 +193,6 @@ comp_from_elf(char* filename)
                             assert(false);
                     }
                     found += 1;
-                    printf("Found `main` func at %p.\n", (void*) new_comp->entry_point);
                 }
                 else
                 {
@@ -217,6 +213,7 @@ comp_from_elf(char* filename)
         // TODO still need relas check or consider only static executables?
         else if (comp_symtb_hdr.sh_type == SHT_RELA) // TODO change name && consider SH_REL
         {
+            assert(false && "currently we only handle static executables");
             if (comp_symtb_hdr.sh_info == 0) // TODO better identify the plt relocation section
             {
                 continue;
@@ -231,6 +228,7 @@ comp_from_elf(char* filename)
             for (size_t j = 0; j < new_comp->relas_cnt; ++j)
             {
                 new_comp->relas[j] = comp_relas[j].r_offset;
+                // TODO double check
                 /*comp_relas[j].r_offset += new_comp->base;*/
                 /*uintptr_t old_plt_val = (uintptr_t) *((void**) comp_relas[j].r_offset);*/
                 /*old_plt_val += new_comp->base;*/
@@ -245,7 +243,6 @@ comp_from_elf(char* filename)
     }
 
     comp_register_ddc(new_comp);
-    comp_print(new_comp);
     return new_comp;
 }
 
@@ -269,7 +266,6 @@ void
 comp_add_intercept(struct Compartment* new_comp, uintptr_t intercept_target, struct func_intercept intercept_data)
 {
     // TODO check whether negative values break anything in all these generated functions
-    printf("Found `%s` func at %p.\n", intercept_data.func_name, (void*) intercept_target);
     int32_t new_instrs[INTERCEPT_INSTR_COUNT];
     size_t new_instr_idx = 0;
     uintptr_t comp_manager_cap_addr = new_comp->manager_caps + new_comp->active_manager_caps_count * sizeof(void* __capability); // TODO
@@ -363,11 +359,10 @@ comp_map(struct Compartment* to_map)
     struct SegmentMap* curr_seg;
     void* map_result;
 
+    // Map compartment segments
     for (size_t i = 0; i < to_map->seg_count; ++i)
     {
         curr_seg = to_map->segs[i];
-        printf("Currently mapping segment %lu:\n", i);
-        segmap_print(curr_seg);
         if (curr_seg->file_sz == curr_seg->mem_sz)
         {
             map_result = mmap((void*) curr_seg->mem_bot,
@@ -392,13 +387,15 @@ comp_map(struct Compartment* to_map)
         }
     }
 
-    printf("Currently mapping compartment scratch memory + stack + manager caps area\n");
+    // Map compartment scratch memory
     map_result = mmap((void*) to_map->scratch_mem_base,
                       to_map->scratch_mem_size,
                       PROT_READ | PROT_WRITE | PROT_EXEC, // TODO Fix this
                       MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS,
                       -1, 0);
     assert(map_result != MAP_FAILED);
+
+    // Map compartment stack
     map_result = mmap((void*) to_map->scratch_mem_stack_top - to_map->scratch_mem_stack_size,
                       to_map->scratch_mem_stack_size,
                       PROT_READ | PROT_WRITE | PROT_EXEC, // TODO fix this
