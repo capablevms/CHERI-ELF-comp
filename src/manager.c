@@ -32,6 +32,55 @@ manager_time(time_t* t)
     return time(t);
 }
 
+/* As we are performing data compartmentalization, we must store relevant
+ * information for accessing an opened file within compartment memory. However,
+ * as we are using a bump allocator for internal memory management, we do not
+ * have the capability of `free`ing this memory. A future implementation of a
+ * better memory allocator will resolve this issue.
+ */
+FILE*
+manager_fopen(const char* filename, const char* mode)
+{
+    FILE* res = fopen(filename, mode);
+    assert(res != NULL);
+    struct Compartment* comp = manager_find_compartment_by_ddc(cheri_ddc_get()); // TODO
+    void* comp_addr = manager_register_mem_alloc(comp, sizeof(FILE));
+    memcpy(comp_addr, res, sizeof(FILE));
+    return comp_addr;
+}
+
+size_t
+manager_fread(void* __restrict buf, size_t size, size_t count, FILE* __restrict fp)
+{
+    return fread(buf, size, count, fp);
+}
+
+size_t
+manager_fwrite(void* __restrict buf, size_t size, size_t count, FILE* __restrict fp)
+{
+    return fwrite(buf, size, count, fp);
+}
+
+int
+manager_fclose(FILE* fp)
+{
+    int res = fclose(fp);
+    assert(res == 0);
+    return res;
+}
+
+int
+manager_getc(FILE* stream)
+{
+    return getc(stream);
+}
+
+int
+manager___srget(FILE* stream)
+{
+    return __srget(stream);
+}
+
 void*
 my_realloc(void* ptr, size_t to_alloc)
 {

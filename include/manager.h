@@ -38,6 +38,13 @@ void intercept_wrapper(void* to_call_fn);
 void setup_intercepts();
 
 time_t manager_time(time_t*);
+FILE* manager_fopen(const char*, const char*);
+size_t manager_fread(void* __restrict, size_t, size_t, FILE* __restrict);
+size_t manager_fwrite(void* __restrict, size_t, size_t, FILE* __restrict);
+int manager_fclose(FILE*);
+int manager_getc(FILE*);
+int manager___srget(FILE*);
+
 void* my_realloc(void*, size_t);
 void* my_malloc(size_t);
 void my_free(void*);
@@ -45,12 +52,19 @@ int my_fprintf(FILE*, const char*, ...);
 
 static const struct func_intercept to_intercept_funcs[] = {
     /* vDSO funcs */
-    { "time", (uintptr_t) manager_time },
+    { "time"    , (uintptr_t) manager_time    },
     /* Mem funcs */
-    { "malloc", (uintptr_t) my_malloc },
-    { "realloc", (uintptr_t) my_realloc },
-    { "free", (uintptr_t) my_free },
-    { "fprintf", (uintptr_t) my_fprintf },
+    { "malloc"  , (uintptr_t) my_malloc       },
+    { "realloc" , (uintptr_t) my_realloc      },
+    { "free"    , (uintptr_t) my_free         },
+    { "fprintf" , (uintptr_t) my_fprintf      },
+    /* Other funcs */
+    { "fopen"   , (uintptr_t) manager_fopen   },
+    { "fread"   , (uintptr_t) manager_fread   },
+    { "fwrite"  , (uintptr_t) manager_fwrite  },
+    { "fclose"  , (uintptr_t) manager_fclose  },
+    { "getc"    , (uintptr_t) manager_getc    },
+    { "__srget" , (uintptr_t) manager___srget },
 };
 //
 // Functions to be intercepted and associated data
