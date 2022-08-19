@@ -7,15 +7,15 @@
  */
 .global intercept_wrapper
 .type intercept_wrapper, "function"
-// TODO restore c29
 intercept_wrapper:
+    stp c28, c29, [sp, #-64]!
     mrs c28, ddc
     msr ddc, c29
-    stp clr, c28, [sp, #-32]!
+    stp clr, c28, [sp, #32]
     blr x10
-    ldp clr, c28, [sp], #32
+    ldp clr, c28, [sp, #32]
     msr ddc, c28
-    mov x29, #0
+    ldp c28, c29, [sp], #64
     ret
 
 /* Function to transition out of a compartment; essentially the `ldpblr`

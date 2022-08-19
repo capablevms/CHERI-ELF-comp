@@ -2,13 +2,6 @@
 
 set -e
 
-# Only execute on `morello-hybrid`
-if [ "$1" != "morello-hybrid" ]
-then
-    echo "Expecting `morello-hybrid` buildbot argument."
-    exit 0
-fi
-
 build_dir="$(pwd)/build"
 src_dir="$(pwd)"
 cheri_dir="/home/buildbot/cheri/output"
@@ -36,12 +29,11 @@ cmake --build $build_dir
 
 # Set arguments for Morello hybrid instance
 export SSHPORT=10086
-export PYTHONPATH="/home/buildbot/build/test-scripts"
 
 args=(
     --architecture morello-hybrid
     # Qemu System to use
-    --qemu-cmd $cheri_dir/morello-sdk/bin/qemu-system-morello
+    --qemu-cmd $cheri_dir/sdk/bin/qemu-system-morello
     --bios edk2-aarch64-code.fd
     --disk-image $cheri_dir/cheribsd-morello-hybrid.img
     # Required build-dir in CheriBSD

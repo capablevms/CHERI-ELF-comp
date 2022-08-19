@@ -28,10 +28,12 @@ struct func_intercept {
     void* __capability redirect_cap;
 };
 
-/* This function expects the argument be passed in `x10`, rather than `x0`. It
- * is expected to be called only in very specific circumstances, and the
- * signature is more illustrative than functional. As such, it shouldn't be
- * called from a C context, as that will most likely break things.
+/* This function expects the argument be passed in `x10`, rather than `x0`, as
+ * well as using `c29` as an argument for the DDC to transition to in order to
+ * allow the intercept to work. It is expected to be called only in very
+ * specific circumstances, and the signature is more illustrative than
+ * functional. As such, it shouldn't be called from a C context, as that will
+ * most likely break things.
  */
 void intercept_wrapper(void* to_call_fn);
 
@@ -43,6 +45,7 @@ size_t manager_fread(void* __restrict, size_t, size_t, FILE* __restrict);
 size_t manager_fwrite(void* __restrict, size_t, size_t, FILE* __restrict);
 int manager_fclose(FILE*);
 int manager_getc(FILE*);
+int manager_fputc(int, FILE*);
 int manager___srget(FILE*);
 
 void* my_realloc(void*, size_t);
@@ -64,6 +67,7 @@ static const struct func_intercept to_intercept_funcs[] = {
     { "fwrite"  , (uintptr_t) manager_fwrite  },
     { "fclose"  , (uintptr_t) manager_fclose  },
     { "getc"    , (uintptr_t) manager_getc    },
+    { "fputc"   , (uintptr_t) manager_fputc   },
     { "__srget" , (uintptr_t) manager___srget },
 };
 //
