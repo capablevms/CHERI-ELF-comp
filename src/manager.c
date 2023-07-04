@@ -62,6 +62,12 @@ manager_fwrite(void* __restrict buf, size_t size, size_t count, FILE* __restrict
 }
 
 int
+manager_fputc(int chr, FILE* stream)
+{
+    return fputc(chr, stream);
+}
+
+int
 manager_fclose(FILE* fp)
 {
     int res = fclose(fp);

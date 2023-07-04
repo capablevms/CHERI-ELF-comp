@@ -1,6 +1,6 @@
 # Sourced from
 # https://github.com/capablevms/cheri-examples/blob/master/bors.toml
-status = ["buildbot/capablevms-test-script"]
+status = ["buildbot/ci-builder"]
 
 timeout_sec = 600 # 10 minutes
 
