@@ -18,8 +18,7 @@ comp_init()
 
     new_comp->size = 0;
     new_comp->base = 0;
-    new_comp->entry_point = 0;
-    new_comp->relas_cnt = 0;
+    new_comp->entry_point_count = 0;
     new_comp->mapped = false;
     new_comp->mapped_full = false;
 
@@ -36,19 +35,33 @@ comp_init()
     return new_comp;
 }
 
-
 /*******************************************************************************
  * Main compartment functions
  ******************************************************************************/
+
+/* Comparison function for `struct entry_point`
+ */
+int
+entry_point_cmp(const void* val1, const void* val2)
+{
+    struct entry_point* ep1 = *(struct entry_point**) val1;
+    struct entry_point* ep2 = *(struct entry_point**) val2;
+    return strcmp(ep1->fn_name, ep2->fn_name);
+}
 
 /* Give a binary ELF file in `filename`, read the ELF data and store it within
  * a `struct Compartment`. At this point, we only read data.
  */
 struct Compartment*
-comp_from_elf(char* filename)
+comp_from_elf(char* filename, char** entry_points)
 {
     struct Compartment* new_comp = comp_init();
     int pread_res;
+    if (!entry_points)
+    {
+        char* main_entry[1] =  { "main" };
+        entry_points = main_entry;
+    }
 
     // Read elf headers
     Elf64_Ehdr comp_ehdr;
@@ -148,7 +161,6 @@ comp_from_elf(char* filename)
     // Find functions of interest, particularly entry points, and functions to
     // intercept
     Elf64_Shdr comp_symtb_hdr; // TODO change name
-    size_t found = 0;
     for (size_t i = 0; i < comp_ehdr.e_shnum; ++i)
     {
         pread_res = pread((int) new_comp->fd, &comp_symtb_hdr, sizeof(Elf64_Shdr),
@@ -158,7 +170,6 @@ comp_from_elf(char* filename)
         // Find functions of interest in injected ELF file
         if (comp_symtb_hdr.sh_type == SHT_SYMTAB)
         {
-            assert(!found);
             Elf64_Shdr comp_strtb_hdr;
             pread_res = pread((int) new_comp->fd, &comp_strtb_hdr, sizeof(Elf64_Shdr), comp_ehdr.e_shoff + comp_symtb_hdr.sh_link * sizeof(Elf64_Shdr));
             assert(pread_res != -1);
@@ -172,43 +183,90 @@ comp_from_elf(char* filename)
 
             size_t syms_count = comp_symtb_hdr.sh_size / sizeof(Elf64_Sym);
             Elf64_Sym curr_sym;
+            char** syms_to_find = entry_points;
+            size_t syms_to_find_count = sizeof(syms_to_find) / sizeof(syms_to_find[0]);
+            char** syms_found = malloc(syms_to_find_count);
+            size_t syms_found_count = 0;
             for (size_t j = 0; j < syms_count; ++j)
             {
                 curr_sym = comp_symtb[j];
-                if (!strcmp("main", &comp_strtb[curr_sym.st_name])) // TODO entry point name
+                for (size_t k = 0; k < syms_to_find_count; ++k)
                 {
-                    switch(new_comp->elf_type)
+                    if (!strcmp(syms_to_find[k], &comp_strtb[curr_sym.st_name])) // TODO entry point name
                     {
-                        case ET_DYN:
+                        struct entry_point* new_entry_point = malloc(sizeof(struct entry_point));
+                        new_entry_point->fn_name = malloc(strlen(syms_to_find[k]) + 1);
+                        strcpy(new_entry_point->fn_name, syms_to_find[k]);
+                        switch(new_comp->elf_type)
                         {
-                            new_comp->entry_point = new_comp->base + curr_sym.st_value;
-                            break;
+                            case ET_DYN:
+                            {
+                                new_entry_point->fn_addr
+                                    = new_comp->base + curr_sym.st_value;
+                                break;
+                            }
+                            case ET_EXEC:
+                            {
+                                new_entry_point->fn_addr
+                                    = curr_sym.st_value;
+                                break;
+                            }
+                            default:
+                                assert(false);
                         }
-                        case ET_EXEC:
-                        {
-                            new_comp->entry_point = curr_sym.st_value;
-                            break;
-                        }
-                        default:
-                            assert(false);
+                        new_comp->comp_fns[new_comp->entry_point_count] =
+                            new_entry_point;
+                        new_comp->entry_point_count += 1;
+                        syms_found[syms_found_count] = syms_to_find[k];
+                        syms_found_count += 1;
                     }
-                    found += 1;
-                }
-                else
-                {
-                    for (size_t i = 0; i < sizeof(to_intercept_funcs) / sizeof(to_intercept_funcs[0]); ++i)
+                    else
                     {
-                        if (!strcmp(comp_intercept_funcs[i].func_name, &comp_strtb[curr_sym.st_name]))
+                        for (size_t i = 0; i < sizeof(to_intercept_funcs) / sizeof(to_intercept_funcs[0]); ++i)
                         {
-                            comp_add_intercept(new_comp, curr_sym.st_value, comp_intercept_funcs[i]);
-                            found += 1;
-                            break;
+                            if (!strcmp(comp_intercept_funcs[i].func_name, &comp_strtb[curr_sym.st_name]))
+                            {
+                                comp_add_intercept(new_comp, curr_sym.st_value, comp_intercept_funcs[i]);
+                                break;
+                            }
                         }
                     }
                 }
             }
-            free(comp_symtb);
-            free(comp_strtb);
+        free(comp_symtb);
+        free(comp_strtb);
+        if (syms_found_count != syms_to_find_count)
+        {
+            char** syms_not_found = malloc(syms_to_find_count);
+            size_t not_found_idx = 0;
+            for (size_t i = 0; i < syms_to_find_count; ++i)
+            {
+                bool not_found = true;
+                for (size_t j = 0; j < syms_found_count; ++j)
+                {
+                    if (!strcmp(syms_found[j], syms_to_find[i]))
+                    {
+                        not_found = false;
+                        break;
+                    }
+                }
+                if (not_found)
+                {
+                    syms_not_found[not_found_idx] = syms_to_find[i];
+                    not_found_idx += 1;
+                }
+            }
+            printf("Did not find following entry points [ ");
+            for (size_t i = 0; i < not_found_idx; ++i)
+            {
+                printf("%s ", syms_not_found[i]);
+            }
+            printf("]\n");
+            free(syms_not_found);
+            free(syms_found);
+            assert(false);
+        }
+        free(syms_found);
         }
         // TODO still need relas check or consider only static executables?
         else if (comp_symtb_hdr.sh_type == SHT_RELA) // TODO change name && consider SH_REL
@@ -440,10 +498,24 @@ void ddc_set(void *__capability cap) {
  * TODO the entry point is currently only the `main` function of a compartment
  */
 int64_t
-comp_exec(struct Compartment* to_exec)
+comp_exec(struct Compartment* to_exec, char* fn_name, void** args, size_t args_count)
 {
     assert(to_exec->mapped && "Attempting to execute an unmapped compartment.\n");
-    void* fn = (void*) to_exec->entry_point;
+
+    void* fn = NULL;
+    for (size_t i = 0; i < to_exec->entry_point_count; ++i)
+    {
+        if (!strcmp(fn_name, to_exec->comp_fns[i]->fn_name))
+        {
+            fn = (void*) to_exec->comp_fns[i]->fn_addr;
+            break;
+        }
+    }
+    if (!fn)
+    {
+    printf("Did not find entry point `%s`!\n", fn_name);
+    assert(false);
+    }
     void* wrap_sp;
 
     // TODO check if we still need this
@@ -454,7 +526,17 @@ comp_exec(struct Compartment* to_exec)
 
     // TODO handle register clobbering stuff (`syscall-restrict` example)
     // https://github.com/capablevms/cheri_compartments/blob/master/code/signal_break.c#L46
-    result = comp_exec_in((void*) to_exec->stack_pointer, to_exec->ddc, fn);
+    assert(args_count <= 3);
+    // TODO attempt to lifting pointers to capabilities before passing to
+    // compartments. Might be needed when handling pointers.
+    /*void * __capability * args_caps;*/
+    /*for (size_t i = 0; i < args_count; ++i)*/
+    /*{*/
+        /*void* __capability arg = (__cheri_tocap void* __capability) args[i];*/
+        /*arg = cheri_perms_and(arg, !(CHERI_PERM_STORE | CHERI_PERM_EXECUTE));*/
+        /*args_caps[i] = arg;*/
+    /*}*/
+    result = comp_exec_in((void*) to_exec->stack_pointer, to_exec->ddc, fn, args, args_count);
 
     return result;
 }
@@ -474,6 +556,11 @@ comp_clean(struct Compartment* to_clean)
     else if (to_clean->mapped_full)
     {
         // TODO unmap
+    }
+    for (size_t i = 0; i < to_clean->entry_point_count; ++i)
+    {
+        free(to_clean->comp_fns[i]->fn_name);
+        free(to_clean->comp_fns[i]);
     }
     free(to_clean);
     // TODO
@@ -498,61 +585,69 @@ find_comp_by_addr(void* to_find)
  * Helper functions
  ******************************************************************************/
 
-// TODO WIP
-void
-setup_stack(struct Compartment* to_setup)
-{
-    assert(to_setup->stack_pointer % 16 == 0);
+/* TODO
+ * WIP attempt to set the stack correctly upon entering the compartment
+ * executable. This is related to `argv` and `envp` stack setup for normal
+ * binary executions. Might be needed for argument passing, and is related to
+ * vDSO loosely.
+ *
+ * Morello reference:
+ * https://git.morello-project.org/morello/kernel/linux/-/wikis/Morello-pure-capability-kernel-user-Linux-ABI-specification#arguments-argv-and-environment-variables-envp
+ */
+/*void*/
+/*setup_stack(struct Compartment* to_setup)*/
+/*{*/
+    /*assert(to_setup->stack_pointer % 16 == 0);*/
 
-    uintptr_t init_sp = to_setup->stack_pointer;
-    uintptr_t argv_ptrs[to_setup->argc];
-    for (size_t i = 0; i < to_setup->argc; ++i)
-    {
-        comp_stack_push(to_setup, to_setup->argv[i], strlen(to_setup->argv[i]));
-        argv_ptrs[i] = to_setup->stack_pointer;
-    }
+    /*uintptr_t init_sp = to_setup->stack_pointer;*/
+    /*uintptr_t argv_ptrs[to_setup->argc];*/
+    /*for (size_t i = 0; i < to_setup->argc; ++i)*/
+    /*{*/
+        /*comp_stack_push(to_setup, to_setup->argv[i], strlen(to_setup->argv[i]));*/
+        /*argv_ptrs[i] = to_setup->stack_pointer;*/
+    /*}*/
 
-    uintptr_t envp_ptrs[ENV_FIELDS_CNT];
-    const char* envp_val;
-    for (size_t i = 0; i < ENV_FIELDS_CNT; ++i)
-    {
-        envp_val = get_env_str(comp_env_fields[i]);
-        comp_stack_push(to_setup, envp_val, strlen(envp_val));
-        envp_ptrs[i] = to_setup->stack_pointer;
-    }
+    /*uintptr_t envp_ptrs[ENV_FIELDS_CNT];*/
+    /*const char* envp_val;*/
+    /*for (size_t i = 0; i < ENV_FIELDS_CNT; ++i)*/
+    /*{*/
+        /*envp_val = get_env_str(comp_env_fields[i]);*/
+        /*comp_stack_push(to_setup, envp_val, strlen(envp_val));*/
+        /*envp_ptrs[i] = to_setup->stack_pointer;*/
+    /*}*/
 
-    size_t stack_push_size = (1 + 1 + 1 + sizeof(envp_ptrs) + sizeof(argv_ptrs)) * sizeof(uint64_t);
-    void* null_delim = NULL;
-    /* argc */
-    size_t stack_argc = to_setup->argc;
-    comp_stack_push(to_setup, &stack_argc, sizeof(uint64_t));
-    /* argv */
-    for (size_t i = 0; i < to_setup->argc; ++i)
-    {
-        comp_stack_push(to_setup, (void*) &argv_ptrs[i], sizeof(uint64_t));
-    }
-    /* argv NULL delimiter */
-    comp_stack_push(to_setup, &null_delim, sizeof(null_delim));
-    /* envp */
-    for (size_t i = 0; i < ENV_FIELDS_CNT; ++i) // envp
-    {
-        /*comp_stack_push(comp_envs[i], strlen(comp_envs[1] + 1);*/
-        comp_stack_push(to_setup, (void*) &envp_ptrs[i], sizeof(uint64_t));
-    }
-    /* envp NULL delimiter */
-    comp_stack_push(to_setup, &null_delim, sizeof(null_delim));
-    /* auxv */
-    comp_stack_auxval_push(to_setup, AT_PAGESZ, elf_aux_info(AT_PAGESZ, NULL, sizeof(size_t)));
-    comp_stack_auxval_push(to_setup, AT_PHDR, to_setup->phdr);
-    comp_stack_auxval_push(to_setup, AT_PHENT, to_setup->phentsize);
-    comp_stack_auxval_push(to_setup, AT_PHNUM, to_setup->phnum);
-    /*comp_stack_auxval_push(to_setup, AT_SECURE, 0);*/
-    /*comp_stack_auxval_push(to_setup, AT_RANDOM, rand());*/
-    comp_stack_auxval_push(to_setup, AT_NULL, 0);
+    /*size_t stack_push_size = (1 + 1 + 1 + sizeof(envp_ptrs) + sizeof(argv_ptrs)) * sizeof(uint64_t);*/
+    /*void* null_delim = NULL;*/
+    /*[> argc <]*/
+    /*size_t stack_argc = to_setup->argc;*/
+    /*comp_stack_push(to_setup, &stack_argc, sizeof(uint64_t));*/
+    /*[> argv <]*/
+    /*for (size_t i = 0; i < to_setup->argc; ++i)*/
+    /*{*/
+        /*comp_stack_push(to_setup, (void*) &argv_ptrs[i], sizeof(uint64_t));*/
+    /*}*/
+    /*[> argv NULL delimiter <]*/
+    /*comp_stack_push(to_setup, &null_delim, sizeof(null_delim));*/
+    /*[> envp <]*/
+    /*for (size_t i = 0; i < ENV_FIELDS_CNT; ++i) // envp*/
+    /*{*/
+        /*[>comp_stack_push(comp_envs[i], strlen(comp_envs[1] + 1);<]*/
+        /*comp_stack_push(to_setup, (void*) &envp_ptrs[i], sizeof(uint64_t));*/
+    /*}*/
+    /*[> envp NULL delimiter <]*/
+    /*comp_stack_push(to_setup, &null_delim, sizeof(null_delim));*/
+    /*[> auxv <]*/
+    /*comp_stack_auxval_push(to_setup, AT_PAGESZ, elf_aux_info(AT_PAGESZ, NULL, sizeof(size_t)));*/
+    /*comp_stack_auxval_push(to_setup, AT_PHDR, to_setup->phdr);*/
+    /*comp_stack_auxval_push(to_setup, AT_PHENT, to_setup->phentsize);*/
+    /*comp_stack_auxval_push(to_setup, AT_PHNUM, to_setup->phnum);*/
+    /*[>comp_stack_auxval_push(to_setup, AT_SECURE, 0);<]*/
+    /*[>comp_stack_auxval_push(to_setup, AT_RANDOM, rand());<]*/
+    /*comp_stack_auxval_push(to_setup, AT_NULL, 0);*/
 
-    to_setup->stack_pointer = init_sp;
+    /*to_setup->stack_pointer = init_sp;*/
 
-}
+/*}*/
 
 /*******************************************************************************
  * Print functions
@@ -563,16 +658,22 @@ void
 comp_print(struct Compartment* to_print)
 {
     printf("=== COMPARTMENT ===\n");
-    printf("\t * ID      --- %lu\n", to_print->id);
-    printf("\t * FD      --- %d\n", to_print->fd);
-    printf("\t * SIZE    --- %lu\n", to_print->size);
-    printf("\t * BASE    --- %#010x\n", (unsigned int) to_print->base);
-    printf("\t * ENTRY   --- %#010x\n", (unsigned int) to_print->entry_point);
-    printf("\t * RELACNT --- %lu\n", to_print->relas_cnt);
-    printf("\t * MAPD    --- %d\n", to_print->mapped);
-    printf("\t * MAPDF   --- %d\n", to_print->mapped_full);
-    printf("\t * SEGC    --- %lu\n", to_print->seg_count);
-    printf("\t * SEGS    --- ");
+    printf("\t * ID        --- %lu\n", to_print->id);
+    printf("\t * FD        --- %d\n", to_print->fd);
+
+    printf("\t * PHDR      --- %hu\n", to_print->phdr);
+    /*printf("\t * DDC       --- %lu\n", to_print->ddc);*/
+
+    printf("\t * SIZE      --- %lu\n", to_print->size);
+    printf("\t * BASE      --- %#010x\n", (unsigned int) to_print->base);
+    printf("\t * ENTRY CNT --- %lu\n", to_print->entry_point_count);
+    printf("\t * MAPD      --- %d\n", to_print->mapped);
+    printf("\t * MAPDF     --- %d\n", to_print->mapped_full);
+
+    /*printf("\t * ENTRY   --- %#010x\n", (unsigned int) to_print->entry_point);*/
+    printf("\t * RELACNT   --- %lu\n", to_print->relas_cnt);
+    printf("\t * SEGC      --- %lu\n", to_print->seg_count);
+    printf("\t * SEGS      --- ");
     for (size_t i = 0; i < to_print->seg_count; ++i)
     {
         printf("%p, ", to_print->segs[i]);

@@ -30,7 +30,7 @@
 
 struct func_intercept;
 void compartment_transition_out();
-int64_t comp_exec_in(void*, void* __capability, void*);
+int64_t comp_exec_in(void*, void* __capability, void*, void**, size_t);
 void comp_exec_out();
 
 // Declare built-in function for cache synchronization:
@@ -53,6 +53,14 @@ struct intercept_patch
     int32_t instr[INTERCEPT_INSTR_COUNT];
     uintptr_t comp_manager_cap_addr;
     void* __capability manager_cap;
+};
+
+/* Struct representing a valid entry point to a compartment
+ */
+struct entry_point
+{
+    char* fn_name;
+    uintptr_t fn_addr;
 };
 
 /* Struct representing one segment of an ELF binary.
@@ -79,8 +87,6 @@ struct Compartment
     int fd;
     Elf64_Half elf_type;
     // Execution info
-    size_t argc;
-    char** argv;
     Elf64_Half phdr;
     Elf64_Half phentsize;
     Elf64_Half phnum;
@@ -88,7 +94,8 @@ struct Compartment
     // ELF data
     size_t size;
     uintptr_t base;
-    uintptr_t entry_point;
+    size_t entry_point_count;
+    struct entry_point* comp_fns[4]; // TODO
     uintptr_t* relas;
     size_t relas_cnt;
     bool mapped;
@@ -123,14 +130,15 @@ struct Compartment
 
 extern struct Compartment** comps;
 
+int entry_point_cmp(const void*, const void*);
 struct Compartment* comp_init();
-struct Compartment* comp_from_elf(char*);
+struct Compartment* comp_from_elf(char*, char**);
 void comp_register_ddc(struct Compartment*);
 void comp_add_intercept(struct Compartment*, uintptr_t, struct func_intercept);
 void comp_stack_push(struct Compartment*, const void*, size_t);
 void comp_map(struct Compartment*);
 void comp_map_full(struct Compartment*);
-int64_t comp_exec(struct Compartment*);
+int64_t comp_exec(struct Compartment*, char*, void**, size_t);
 void comp_clean(struct Compartment*);
 
 void log_new_comp(struct Compartment*);
