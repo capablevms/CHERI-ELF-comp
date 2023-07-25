@@ -13,6 +13,10 @@ git submodule update --init
 lua_dir="$src_dir/third-party/lua"
 patch -d $lua_dir -i ../lua.patch
 
+# Apply toml patch
+toml_dir="$src_dir/third_party/tomlc99"
+patch -d $toml_dir -i ../toml.patch
+
 # Build project locally
 export CC=$cheri_dir/morello-sdk/bin/clang
 export CFLAGS="--config cheribsd-morello-hybrid.cfg"

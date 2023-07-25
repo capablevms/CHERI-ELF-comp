@@ -1,0 +1,2 @@
+check_simple,2,int,int
+check_combined,3,int,char,long

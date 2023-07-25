@@ -12,55 +12,6 @@
 
 extern struct Compartment* loaded_comp;
 
-struct CompEntryPoints
-{
-    char* file_name;
-    char** entry_points;
-    size_t arg_count;
-    void** args;
-};
-
-#define comp_entries_count 4
-struct CompEntryPoints comp_entries[comp_entries_count] =
-{
-    { "lua_script"   , (char*[]) { "do_script"  }, 0, NULL, },
-    { "args_simple"  , (char*[]) { "check_fn"   }, 2, (void*[]) { (void*) 40,  (void*) 2} },
-    { "args_combined", (char*[]) { "check_fn"   }, 3, (void*[]) { (void*) 400, (void*) '2', (void*) 20} },
-    { "args_long_max", (char*[]) { "check_long" }, 1, (void*[]) { (void*) LLONG_MAX } },
-};
-
-struct CompEntryPoints*
-get_entry_points(char* comp_name)
-{
-    for (size_t i = 0; i < comp_entries_count; ++i)
-    {
-        if (!strcmp(comp_entries[i].file_name, comp_name))
-        {
-            return &comp_entries[i];
-        }
-    }
-    assert(false);
-}
-
-char*
-get_entry_point_fn(struct CompEntryPoints* cep)
-{
-    return cep->entry_points[0];
-}
-
-void**
-get_entry_point_args(struct CompEntryPoints* cep)
-{
-    void** comp_args = malloc(cep->arg_count * sizeof(void*));
-    for (size_t i = 0; i < cep->arg_count; ++i)
-    {
-        void* arg_ptr = malloc(sizeof(cep->args[i]));
-        memcpy(arg_ptr, &cep->args[i], sizeof(cep->args[i]));
-        comp_args[i] = arg_ptr;
-    }
-    return comp_args;
-}
-
 char*
 prep_filename(char* filename)
 {
@@ -72,16 +23,6 @@ prep_filename(char* filename)
     return filename;
 }
 
-void
-args_clean(void** comp_args, size_t arg_count)
-{
-    for (size_t i = 0; i < arg_count; ++i)
-    {
-        free(comp_args[i]);
-    }
-    free(comp_args);
-}
-
 int
 main(int argc, char** argv)
 {
@@ -89,19 +30,34 @@ main(int argc, char** argv)
     manager_ddc = cheri_ddc_get();
     setup_intercepts();
 
-    assert(argc >= 3 && "Expect at least two arguments: binary file for compartment, and at least one argument to pass to compartment.");
+    assert(argc >= 4 && "Expect at least three arguments: binary file for compartment, entry function for compartment, and at least one argument to pass to compartment function.");
     char* file = prep_filename(argv[1]);
+    char* file_config = malloc(sizeof(file) + sizeof(comp_config_suffix) + 1);
+    strcpy(file_config, file);
+    strcat(file_config, comp_config_suffix);
+    FILE* comp_config_fd = fopen(file_config, "r");
+    free(file_config);
+    struct ConfigEntryPoint* cep = NULL;
+    size_t entry_point_count = 0;
+    char** entry_points = NULL;
+    if (comp_config_fd)
+    {
+        cep = parse_compartment_config(comp_config_fd, &entry_point_count);
+        fclose(comp_config_fd);
+    }
+    // TODO else set main as default entry point
 
-    struct CompEntryPoints* cep = get_entry_points(file);
-    struct Compartment* arg_comp = comp_from_elf(file, cep->entry_points);
+    struct Compartment* arg_comp = comp_from_elf(file, cep, entry_point_count);
     loaded_comp = arg_comp; // TODO
     log_new_comp(arg_comp);
     comp_map(arg_comp);
 
-
-    void** comp_args = get_entry_point_args(cep);
-    int comp_result = comp_exec(arg_comp, get_entry_point_fn(cep), comp_args, cep->arg_count);
+    char* entry_func = argv[2];
+    char** entry_func_args = &argv[3];
+    struct ConfigEntryPoint comp_entry = get_entry_point(entry_func, cep, entry_point_count);
+    void* comp_args = prepare_compartment_args(entry_func_args, comp_entry);
+    int comp_result = comp_exec(arg_comp, entry_func, comp_args, comp_entry.arg_count, comp_entry.args_sizes);
+    clean_compartment_config(cep, entry_point_count);
     comp_clean(arg_comp);
-    args_clean(comp_args, cep->arg_count);
     return comp_result;
 }

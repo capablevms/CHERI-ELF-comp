@@ -5,4 +5,5 @@ add_library(chcomp STATIC
     compartment.c
     transition.S
     )
-target_include_directories(chcomp PRIVATE ${INCLUDE_DIR})
+target_include_directories(chcomp PRIVATE ${INCLUDE_DIR} ${TOML_INCLUDE_DIR})
+target_link_libraries(chcomp PRIVATE tomllib)

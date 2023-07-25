@@ -1,0 +1,14 @@
+diff --git a/Makefile b/Makefile
+index 599f7db..16c81ea 100644
+--- a/Makefile
++++ b/Makefile
+@@ -5,7 +5,8 @@ OBJ = $(CFILES:.c=.o)
+ EXEC = toml_json toml_cat toml_sample
+ PCFILE = libtoml.pc
+ 
+-CFLAGS = -std=c99 -Wall -Wextra -fpic
++CFLAGS = --config cheribsd-morello-hybrid.cfg -std=c99 -Wall -Wextra -fpic
++LDFLAGS = --config cheribdf-morello-hybrid.cfg
+ LIB_VERSION = 1.0
+ LIB = libtoml.a
+ LIB_SHARED = libtoml.so.$(LIB_VERSION)
