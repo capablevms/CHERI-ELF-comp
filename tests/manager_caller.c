@@ -27,7 +27,7 @@ main(int argc, char** argv)
     comp_map(hw_comp);
     int comp_result;
     size_t comp_args_count = 0;
-    comp_result = comp_exec(hw_comp, "main", NULL, 0, NULL);
+    comp_result = comp_exec(hw_comp, "main", NULL, 0);
     comp_clean(hw_comp);
     free(main_cep);
     return comp_result;

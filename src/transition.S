@@ -31,7 +31,7 @@ compartment_transition_out:
 compartment_transition_out_end:
 
 /* comp_exec_in(void* comp_sp, void* __capability comp_ddc, void* fn,
-                void* args, size_t args_count, char* args_sizes) */
+                void* args, size_t args_count) */
 /* Instructions to enter a compartment. There is no `ret`, as we need to
  * perform a context switch upon exiting, which is done via `ldpbr`
  */
@@ -48,35 +48,23 @@ comp_exec_in:
 
     // Load params (only handle 3 params):
 loading_params:
-    cbz  x4, loaded_params
-    ldrb w6, [x5], #1 // Get size of argument to load in `x6`
-                      // Increment `x5` by 1 byte since it's `char`s
-    bl   load_param_by_size
-    mov  x0, x8       // Store one argument
-    add  x3, x3, x6   // Shift array pointer by size of argument
-    sub  x4, x4, #1
+    cbz  x4, loaded_params // Check if we loaded all parameters
+    bl   load_param
+    mov  x0, x5       // Store one argument
 
     cbz  x4, loaded_params
-    ldrb w6, [x5], #1
-    bl   load_param_by_size
-    mov  x1, x8
-    add  x3, x3, x6
-    sub  x4, x4, #1
+    bl   load_param
+    mov  x1, x5
 
     cbz  x4, loaded_params
-    ldrb w6, [x5], #1
-    bl   load_param_by_size
-    mov  x2, x8
-    add  x3, x3, x6
-    sub  x4, x4, #1
+    bl   load_param
+    mov  x2, x5
     b    loaded_params
 
-load_param_by_size:
-    neg  x7, x6, lsl #3 // Get number of bits to throw away (0 - x6 * 8)
-    ldr  x8, [x3]       // Load next 64 bits of argument
-    lsl  x8, x8, x7     // Shift left to remove unneeded upper bits,
-                        // shifting in 0s on the right
-    lsr  x8, x8, x7     // Shift back right, again shifting in 0s on the left
+load_param:
+    ldr  x5, [x3]
+    add  x3, x3, #8
+    sub  x4, x4, #1
     ret
 
 loaded_params:
@@ -84,9 +72,6 @@ loaded_params:
     mov x3, xzr
     mov x4, xzr
     mov x5, xzr
-    mov x6, xzr
-    mov x7, xzr
-    mov x8, xzr
 
     mov sp, x9
     msr DDC, c10

@@ -48,7 +48,6 @@ function(new_test test_name)
     elseif(${ARGC} GREATER_EQUAL "3")
         set(test_bin ${ARGV1})
         list(JOIN ARGV2 " " test_args)
-        message(STATUS ${test_args})
         get_property(is_comp TARGET ${test_bin} PROPERTY compartment SET)
         if(is_comp)
             add_test(NAME ${test_name}
@@ -63,7 +62,9 @@ endfunction()
 
 # Library tests
 set(func_binaries
-    "test_map")
+    "test_map"
+    "test_args_near_unmapped"
+    )
 
 set(comp_binaries
     "simple"
@@ -74,7 +75,6 @@ set(comp_binaries
     )
 
 set(tests
-    "test_map"
     "simple"
     "time"
     "lua_simple"
@@ -86,6 +86,9 @@ set(tests
     "args-long-max args_simple check_llong_max 9223372036854775807"
     "args-long-min args_simple check_llong_min -9223372036854775808"
     "args-ulong-max args_simple check_ullong_max 18446744073709551615"
+    # Order matters, as these depend on some files to be copied in earlier tests
+    "test_map"
+    "test_args_near_unmapped"
     )
 
 foreach(comp_t IN LISTS comp_binaries)

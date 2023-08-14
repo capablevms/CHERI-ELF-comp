@@ -14,11 +14,12 @@ lua_dir="$src_dir/third-party/lua"
 patch -d $lua_dir -i ../lua.patch
 
 # Apply toml patch
-toml_dir="$src_dir/third_party/tomlc99"
-patch -d $toml_dir -i ../toml.patch
+toml_dir="$src_dir/third-party/tomlc99"
+patch -d $toml_dir -i ../tomlc99.patch
 
 # Build project locally
 export CC=$cheri_dir/morello-sdk/bin/clang
+export AR=$cheri_dir/morello-sdk/bin/llvm-ar
 export CFLAGS="--config cheribsd-morello-hybrid.cfg"
 export ASMFLAGS="--config cheribsd-morello-hybrid.cfg"
 

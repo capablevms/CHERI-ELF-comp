@@ -30,7 +30,7 @@
 
 struct func_intercept;
 void compartment_transition_out();
-int64_t comp_exec_in(void*, void* __capability, void*, void*, size_t, char*);
+int64_t comp_exec_in(void*, void* __capability, void*, void*, size_t);
 void comp_exec_out();
 
 // Declare built-in function for cache synchronization:
@@ -55,6 +55,17 @@ struct intercept_patch
     void* __capability manager_cap;
 };
 
+// Maximum size of an argument, in bytes
+#define COMP_ARG_SIZE 8
+
+// This is a guard for the expected size of an argument, and a consequence of
+// using `x` registers in `loading_params` in `transition.S`. This should be
+// the equivalent of checking for a 64-bit CHERI aware platform
+// TODO is there a better way to check?
+#if !(__LP64__ && __has_feature(capabilities))
+#error Expecting 64-bit Arm Morello platform
+#endif
+
 /* Struct representing configuration data for one entry point; this is just
  * information that we expect to appear in the compartment, as given by its
  * compartment configuration file
@@ -64,8 +75,6 @@ struct ConfigEntryPoint
     const char* name;
     size_t arg_count;
     char** args_type;
-    size_t all_args_size;
-    char* args_sizes;
 };
 
 /* Struct representing a valid entry point to a compartment
@@ -153,7 +162,7 @@ void comp_add_intercept(struct Compartment*, uintptr_t, struct func_intercept);
 void comp_stack_push(struct Compartment*, const void*, size_t);
 void comp_map(struct Compartment*);
 void comp_map_full(struct Compartment*);
-int64_t comp_exec(struct Compartment*, char*, void*, size_t, char*);
+int64_t comp_exec(struct Compartment*, char*, void*, size_t);
 void comp_clean(struct Compartment*);
 
 void log_new_comp(struct Compartment*);

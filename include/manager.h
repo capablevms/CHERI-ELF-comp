@@ -112,7 +112,15 @@ const char* get_env_str(const char*);
 int manager___vdso_clock_gettime(clockid_t, struct timespec*);
 // END TODO
 
-char get_size_of_str_type(char*);
+union arg_holder
+{
+    int i;
+    long l;
+    char c;
+    long long ll;
+    unsigned long long ull;
+};
+
 struct ConfigEntryPoint* parse_compartment_config(FILE*, size_t*);
 void clean_compartment_config(struct ConfigEntryPoint*, size_t);
 struct ConfigEntryPoint get_entry_point(char*, struct ConfigEntryPoint*, size_t);

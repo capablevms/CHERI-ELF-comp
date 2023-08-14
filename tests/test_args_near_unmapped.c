@@ -12,17 +12,6 @@
 
 extern struct Compartment* loaded_comp;
 
-char*
-prep_filename(char* filename)
-{
-    const char* prefix = "./";
-    if (!strncmp(filename, prefix, strlen(prefix)))
-    {
-        filename += strlen(prefix);
-    }
-    return filename;
-}
-
 int
 main(int argc, char** argv)
 {
@@ -30,8 +19,7 @@ main(int argc, char** argv)
     manager_ddc = cheri_ddc_get();
     setup_intercepts();
 
-    assert(argc >= 4 && "Expect at least three arguments: binary file for compartment, entry function for compartment, and at least one argument to pass to compartment function.");
-    char* file = prep_filename(argv[1]);
+    char* file = "args_simple";
     char* file_config = malloc(sizeof(file) + sizeof(comp_config_suffix) + 1);
     strcpy(file_config, file);
     strcat(file_config, comp_config_suffix);
@@ -52,12 +40,28 @@ main(int argc, char** argv)
     log_new_comp(arg_comp);
     comp_map(arg_comp);
 
-    char* entry_func = argv[2];
-    char** entry_func_args = &argv[3];
+    char* entry_func = "check_simple";
+    char* entry_func_args[2] = { "40", "2" };
     struct ConfigEntryPoint comp_entry = get_entry_point(entry_func, cep, entry_point_count);
     void* comp_args = prepare_compartment_args(entry_func_args, comp_entry);
+
+    // Allocate two pages worth of memory (ensure larger than size of args)...
+    size_t page_size = sysconf(_SC_PAGESIZE);
+    assert(page_size > comp_entry.arg_count * COMP_ARG_SIZE);
+    size_t two_page_size = 2 * page_size;
+    void* two_page_alloc = mmap(NULL, two_page_size, PROT_WRITE | PROT_READ, MAP_ANONYMOUS, -1, 0);
+    // ... move args in the first page, near page boundary ...
+    void* memcpy_address = (char*) two_page_alloc + page_size - comp_entry.arg_count * COMP_ARG_SIZE;
+    memcpy(memcpy_address, comp_args, comp_entry.arg_count * COMP_ARG_SIZE);
+    // ... and set second page as inaccessible
+    // ... and deallocate the second page
+    munmap(two_page_alloc + page_size, page_size);
+    free(comp_args);
+    comp_args = memcpy_address;
+
     int comp_result = comp_exec(arg_comp, entry_func, comp_args, comp_entry.arg_count);
     clean_compartment_config(cep, entry_point_count);
     comp_clean(arg_comp);
+    munmap(two_page_alloc, page_size);
     return comp_result;
 }

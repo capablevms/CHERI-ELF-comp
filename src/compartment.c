@@ -504,7 +504,7 @@ void ddc_set(void *__capability cap) {
  * prefer to default to `main` in that case
  */
 int64_t
-comp_exec(struct Compartment* to_exec, char* fn_name, void* args, size_t args_count, char* args_sizes)
+comp_exec(struct Compartment* to_exec, char* fn_name, void* args, size_t args_count)
 {
     assert(to_exec->mapped && "Attempting to execute an unmapped compartment.\n");
 
@@ -542,7 +542,7 @@ comp_exec(struct Compartment* to_exec, char* fn_name, void* args, size_t args_co
         /*arg = cheri_perms_and(arg, !(CHERI_PERM_STORE | CHERI_PERM_EXECUTE));*/
         /*args_caps[i] = arg;*/
     /*}*/
-    result = comp_exec_in((void*) to_exec->stack_pointer, to_exec->ddc, fn, args, args_count, args_sizes);
+    result = comp_exec_in((void*) to_exec->stack_pointer, to_exec->ddc, fn, args, args_count);
 
     return result;
 }

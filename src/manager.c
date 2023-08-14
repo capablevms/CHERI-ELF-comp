@@ -204,33 +204,6 @@ toml_parse_error(char* error_msg, char* errbuf)
     exit(1);
 }
 
-char
-get_size_of_str_type(char* str_type)
-{
-    if (!strcmp(str_type, "int"))
-    {
-        return sizeof(int);
-    }
-    else if (!strcmp(str_type, "char"))
-    {
-        return sizeof(char);
-    }
-    else if (!strcmp(str_type, "long"))
-    {
-        return sizeof(long);
-    }
-    else if (!strcmp(str_type, "long long"))
-    {
-        return sizeof(long long);
-    }
-    else if (!strcmp(str_type, "unsigned long long"))
-    {
-        return sizeof(unsigned long long);
-    }
-    printf("Did not check for size of type %s!\n", str_type);
-    assert(false);
-}
-
 struct ConfigEntryPoint*
 parse_compartment_config(FILE* config_fd, size_t* entry_point_count)
 {
@@ -255,18 +228,12 @@ parse_compartment_config(FILE* config_fd, size_t* entry_point_count)
 
         entry_points[i].name = fname;
         entry_points[i].arg_count = func_arg_count.u.i;
-        entry_points[i].all_args_size = 0;
         entry_points[i].args_type = malloc(func_arg_count.u.i * sizeof(char*));
-        entry_points[i].args_sizes = malloc(func_arg_count.u.i * sizeof(char));
         for (size_t j = 0; j < toml_array_nelem(func_arg_types); ++j)
         {
             toml_datum_t func_arg_type = toml_string_at(func_arg_types, j);
             entry_points[i].args_type[j] = malloc(strlen(func_arg_type.u.s) + 1);
             strcpy(entry_points[i].args_type[j], func_arg_type.u.s);
-            char curr_arg_size = get_size_of_str_type(func_arg_type.u.s);
-            free(func_arg_type.u.s);
-            entry_points[i].all_args_size += curr_arg_size;
-            entry_points[i].args_sizes[j] = curr_arg_size;
         }
     }
     return entry_points;
@@ -282,7 +249,6 @@ clean_compartment_config(struct ConfigEntryPoint* cep, size_t entry_point_count)
             free(cep[i].args_type[j]);
         }
         free(cep[i].args_type);
-        free(cep[i].args_sizes);
     }
     free(cep);
 }
@@ -307,42 +273,43 @@ get_entry_point(char* entry_point_fn, struct ConfigEntryPoint* ceps, size_t cep_
 void*
 prepare_compartment_args(char** args, struct ConfigEntryPoint cep)
 {
-    void* parsed_args = malloc(cep.all_args_size);
+    void* parsed_args = calloc(COMP_ARG_SIZE, cep.arg_count);
     size_t allocated_args = 0;
-    void* arg_ptr;
+    size_t to_copy;
+    union arg_holder tmp;
     for (size_t i = 0; i < cep.arg_count; ++i)
     {
         if (!strcmp(cep.args_type[i], "int"))
         {
-            int tmp = atoi(args[i]);
-            arg_ptr = &tmp;
+            tmp.i = atoi(args[i]);
+            to_copy = sizeof(int);
         }
         else if (!strcmp(cep.args_type[i], "long"))
         {
-            long tmp = atol(args[i]);
-            arg_ptr = &tmp;
+            tmp.l = atol(args[i]);
+            to_copy = sizeof(long);
         }
         else if (!strcmp(cep.args_type[i], "char"))
         {
-            arg_ptr = args[i];
+            tmp.c = *args[i];
+            to_copy = sizeof(char);
         }
         else if (!strcmp(cep.args_type[i], "long long"))
         {
-            long long tmp = atoll(args[i]);
-            arg_ptr = &tmp;
+            tmp.ll = atoll(args[i]);
+            to_copy = sizeof(long long);
         }
         else if (!strcmp(cep.args_type[i], "unsigned long long"))
         {
-            unsigned long long tmp = strtoull(args[i], NULL, 10);
-            arg_ptr = &tmp;
+            tmp.ull = strtoull(args[i], NULL, 10);
+            to_copy = sizeof(unsigned long long);
         }
         else
         {
             printf("Unhandled compartment argument type %s!\n", cep.args_type[i]);
             assert(false);
         }
-        memcpy(parsed_args + allocated_args, arg_ptr, cep.args_sizes[i]);
-        allocated_args += cep.args_sizes[i];
+        memcpy(parsed_args + i * COMP_ARG_SIZE, &tmp, to_copy);
     }
     return parsed_args;
 }
@@ -354,7 +321,5 @@ set_default_entry_point(struct ConfigEntryPoint* cep)
     strcpy((char*) cep->name, "main");
     cep->arg_count = 0;
     cep->args_type = NULL;
-    cep->all_args_size = 0;
-    cep->args_sizes = NULL;
     return cep;
 }

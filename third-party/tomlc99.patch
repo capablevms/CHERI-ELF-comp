@@ -1,5 +1,5 @@
 diff --git a/Makefile b/Makefile
-index 599f7db..16c81ea 100644
+index 599f7db..05b3956 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -5,7 +5,8 @@ OBJ = $(CFILES:.c=.o)
@@ -8,7 +8,20 @@ index 599f7db..16c81ea 100644
  
 -CFLAGS = -std=c99 -Wall -Wextra -fpic
 +CFLAGS = --config cheribsd-morello-hybrid.cfg -std=c99 -Wall -Wextra -fpic
-+LDFLAGS = --config cheribdf-morello-hybrid.cfg
++LDFLAGS = --config cheribsd-morello-hybrid.cfg
  LIB_VERSION = 1.0
  LIB = libtoml.a
  LIB_SHARED = libtoml.so.$(LIB_VERSION)
+@@ -24,10 +25,10 @@ all: $(LIB) $(LIB_SHARED) $(EXEC)
+ *.o: $(HFILES)
+ 
+ libtoml.a: toml.o
+-	ar -rcs $@ $^
++	$(AR) -rcs $@ $^
+ 
+ libtoml.so.$(LIB_VERSION): toml.o
+-	$(CC) -shared -o $@ $^
++	$(CC) $(LDFLAGS) -shared -o $@ $^
+ 
+ $(EXEC): $(LIB)
+ 
