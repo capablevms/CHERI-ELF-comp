@@ -40,10 +40,12 @@ function(new_test test_name)
         get_property(is_comp TARGET ${test_name} PROPERTY compartment SET)
         if(is_comp)
             add_test(NAME ${test_name}
-                     COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.sh comp $<TARGET_FILE:${test_name}>)
+                     #COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.sh comp $<TARGET_FILE:${test_name}>)
+                     COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.py manager_call $<TARGET_FILE:${test_name}>)
         else()
             add_test(NAME ${test_name}
-                     COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.sh test $<TARGET_FILE:${test_name}>)
+                     #COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.sh test $<TARGET_FILE:${test_name}>)
+                     COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.sh $<TARGET_FILE:${test_name}>)
         endif()
     elseif(${ARGC} GREATER_EQUAL "3")
         set(test_bin ${ARGV1})
@@ -51,13 +53,28 @@ function(new_test test_name)
         get_property(is_comp TARGET ${test_bin} PROPERTY compartment SET)
         if(is_comp)
             add_test(NAME ${test_name}
-                COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.sh comp $<TARGET_FILE:${test_bin}> ${test_args})
+                #COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.sh comp $<TARGET_FILE:${test_bin}> ${test_args})
+                COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.py manager_args $<TARGET_FILE:${test_bin}> --test-args ${test_args})
         else()
             message(FATAL_ERROR "Shouldn't get here")
         endif()
     else()
         message(FATAL_ERROR "Missing arguments to test.")
     endif()
+endfunction()
+
+function(two_comp_test test_bin comp1 comp2)
+    add_executable(${test_bin} ${test_bin}.c)
+    target_link_libraries(${test_bin} PRIVATE chcomp dl m lualib)
+    target_include_directories(${test_bin} PRIVATE ${INCLUDE_DIR} ${LUA_INCLUDE_DIR})
+    add_executable(${comp1} ${comp1}.c)
+    target_compile_options(${comp1} PRIVATE -static)
+    target_link_options(${comp1} PRIVATE -static "LINKER:-image-base=0x1000000")
+    add_executable(${comp2} ${comp2}.c)
+    target_compile_options(${comp2} PRIVATE -static)
+    target_link_options(${comp2} PRIVATE -static "LINKER:-image-base=0x2000000")
+    add_test(NAME test_two_comp-${test_bin}
+        COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.py $<TARGET_FILE:${test_bin}> --dependencies $<TARGET_FILE:${comp1}> $<TARGET_FILE:${comp2}>)
 endfunction()
 
 # Library tests
@@ -90,6 +107,8 @@ set(tests
     "test_map"
     "test_args_near_unmapped"
     )
+
+two_comp_test(test_two_comps test_two_comps-comp1 test_two_comps-comp2)
 
 foreach(comp_t IN LISTS comp_binaries)
     new_target(${comp_t} TRUE)

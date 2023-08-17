@@ -33,7 +33,11 @@ then
     FILES_TO_PREP=(./tests/manager_call ./tests/manager_args ../tests/hello_world.lua ../tests/args_simple.comp)
     ssh -o "StrictHostKeyChecking no" -p $CHERIBSD_PORT $CHERIBSD_USER@$CHERIBSD_HOST -t "mkdir -p ${CHERIBSD_TEST_DIR}"
     scp -o "StrictHostKeyChecking no" -P $CHERIBSD_PORT "${FILES_TO_PREP[@]}" $CHERIBSD_USER@$CHERIBSD_HOST:${CHERIBSD_TEST_DIR}/
+elif [ "$1" == "prep_this" ]
+then
+    ssh -o "StrictHostKeyChecking no" -p $CHERIBSD_PORT $CHERIBSD_USER@$CHERIBSD_HOST -t "mkdir -p ${CHERIBSD_TEST_DIR}"
+    scp -o "StrictHostKeyChecking no" -P $CHERIBSD_PORT "$test_name" $CHERIBSD_USER@$CHERIBSD_HOST:${CHERIBSD_TEST_DIR}/
 else
-    echo "Unsupported operation given: $1. Expected [ prep, test, comp ]."
+    echo "Unsupported operation given: $1. Expected [ prep, prep_this, test, comp ]."
     exit 1
 fi
