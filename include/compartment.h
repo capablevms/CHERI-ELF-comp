@@ -30,7 +30,7 @@
 
 struct func_intercept;
 void compartment_transition_out();
-int64_t comp_exec_in(void*, void* __capability, void*, void**, size_t);
+int64_t comp_exec_in(void*, void* __capability, void*, void*, size_t);
 void comp_exec_out();
 
 // Declare built-in function for cache synchronization:
@@ -55,12 +55,36 @@ struct intercept_patch
     void* __capability manager_cap;
 };
 
+// Maximum size of an argument, in bytes
+#define COMP_ARG_SIZE 8
+
+// This is a guard for the expected size of an argument, and a consequence of
+// using `x` registers in `loading_params` in `transition.S`. This should be
+// the equivalent of checking for a 64-bit CHERI aware platform
+// TODO is there a better way to check?
+#if !(__LP64__ && __has_feature(capabilities))
+#error Expecting 64-bit Arm Morello platform
+#endif
+
+/* Struct representing configuration data for one entry point; this is just
+ * information that we expect to appear in the compartment, as given by its
+ * compartment configuration file
+ */
+struct ConfigEntryPoint
+{
+    const char* name;
+    size_t arg_count;
+    char** args_type;
+};
+
 /* Struct representing a valid entry point to a compartment
  */
 struct entry_point
 {
-    char* fn_name;
+    const char* fn_name;
     uintptr_t fn_addr;
+    size_t arg_count;
+    char** arg_types;
 };
 
 /* Struct representing one segment of an ELF binary.
@@ -95,7 +119,7 @@ struct Compartment
     size_t size;
     uintptr_t base;
     size_t entry_point_count;
-    struct entry_point* comp_fns[4]; // TODO
+    struct entry_point** comp_fns; // TODO
     uintptr_t* relas;
     size_t relas_cnt;
     bool mapped;
@@ -132,13 +156,13 @@ extern struct Compartment** comps;
 
 int entry_point_cmp(const void*, const void*);
 struct Compartment* comp_init();
-struct Compartment* comp_from_elf(char*, char**);
+struct Compartment* comp_from_elf(char*, struct ConfigEntryPoint*, size_t);
 void comp_register_ddc(struct Compartment*);
 void comp_add_intercept(struct Compartment*, uintptr_t, struct func_intercept);
 void comp_stack_push(struct Compartment*, const void*, size_t);
 void comp_map(struct Compartment*);
 void comp_map_full(struct Compartment*);
-int64_t comp_exec(struct Compartment*, char*, void**, size_t);
+int64_t comp_exec(struct Compartment*, char*, void*, size_t);
 void comp_clean(struct Compartment*);
 
 void log_new_comp(struct Compartment*);

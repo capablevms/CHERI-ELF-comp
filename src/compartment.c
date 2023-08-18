@@ -53,15 +53,14 @@ entry_point_cmp(const void* val1, const void* val2)
  * a `struct Compartment`. At this point, we only read data.
  */
 struct Compartment*
-comp_from_elf(char* filename, char** entry_points)
+comp_from_elf(char* filename, struct ConfigEntryPoint* entry_points, size_t entry_point_count)
 {
     struct Compartment* new_comp = comp_init();
     int pread_res;
-    if (!entry_points)
-    {
-        char* main_entry[1] =  { "main" };
-        entry_points = main_entry;
-    }
+
+    assert(entry_points);
+    assert(entry_point_count > 0);
+    new_comp->comp_fns = malloc(entry_point_count * sizeof(struct entry_point));
 
     // Read elf headers
     Elf64_Ehdr comp_ehdr;
@@ -183,20 +182,20 @@ comp_from_elf(char* filename, char** entry_points)
 
             size_t syms_count = comp_symtb_hdr.sh_size / sizeof(Elf64_Sym);
             Elf64_Sym curr_sym;
-            char** syms_to_find = entry_points;
-            size_t syms_to_find_count = sizeof(syms_to_find) / sizeof(syms_to_find[0]);
-            char** syms_found = malloc(syms_to_find_count);
+            size_t syms_to_find_count = entry_point_count;
+            const char** syms_found = malloc(syms_to_find_count);
             size_t syms_found_count = 0;
             for (size_t j = 0; j < syms_count; ++j)
             {
                 curr_sym = comp_symtb[j];
                 for (size_t k = 0; k < syms_to_find_count; ++k)
                 {
-                    if (!strcmp(syms_to_find[k], &comp_strtb[curr_sym.st_name])) // TODO entry point name
+                    if (!strcmp(entry_points[k].name, &comp_strtb[curr_sym.st_name]))
                     {
                         struct entry_point* new_entry_point = malloc(sizeof(struct entry_point));
-                        new_entry_point->fn_name = malloc(strlen(syms_to_find[k]) + 1);
-                        strcpy(new_entry_point->fn_name, syms_to_find[k]);
+                        new_entry_point->fn_name = entry_points[k].name;
+                        new_entry_point->arg_count = entry_points[k].arg_count;
+                        new_entry_point->arg_types = entry_points[k].args_type;
                         switch(new_comp->elf_type)
                         {
                             case ET_DYN:
@@ -217,7 +216,7 @@ comp_from_elf(char* filename, char** entry_points)
                         new_comp->comp_fns[new_comp->entry_point_count] =
                             new_entry_point;
                         new_comp->entry_point_count += 1;
-                        syms_found[syms_found_count] = syms_to_find[k];
+                        syms_found[syms_found_count] = entry_points[k].name;
                         syms_found_count += 1;
                     }
                     else
@@ -237,14 +236,14 @@ comp_from_elf(char* filename, char** entry_points)
         free(comp_strtb);
         if (syms_found_count != syms_to_find_count)
         {
-            char** syms_not_found = malloc(syms_to_find_count);
+            const char** syms_not_found = malloc(syms_to_find_count);
             size_t not_found_idx = 0;
             for (size_t i = 0; i < syms_to_find_count; ++i)
             {
                 bool not_found = true;
                 for (size_t j = 0; j < syms_found_count; ++j)
                 {
-                    if (!strcmp(syms_found[j], syms_to_find[i]))
+                    if (!strcmp(syms_found[j], entry_points[i].name))
                     {
                         not_found = false;
                         break;
@@ -252,7 +251,7 @@ comp_from_elf(char* filename, char** entry_points)
                 }
                 if (not_found)
                 {
-                    syms_not_found[not_found_idx] = syms_to_find[i];
+                    syms_not_found[not_found_idx] = entry_points[i].name;
                     not_found_idx += 1;
                 }
             }
@@ -495,10 +494,17 @@ void ddc_set(void *__capability cap) {
 
 /* Execute a mapped compartment, by jumping to the appropriate entry point.
  *
- * TODO the entry point is currently only the `main` function of a compartment
+ * The entry point is given as a function name in the `fn_name` argument, and
+ * arguments to be passed are tightly packed in `args`. The requested entry
+ * point must have been registered prior during compartment initialization, by
+ * calling `parse_compartment_config`, and passing an appropriate `.comp`
+ * config file.
+ *
+ * TODO casually ignore the situation where no compartment is passed, if we
+ * prefer to default to `main` in that case
  */
 int64_t
-comp_exec(struct Compartment* to_exec, char* fn_name, void** args, size_t args_count)
+comp_exec(struct Compartment* to_exec, char* fn_name, void* args, size_t args_count)
 {
     assert(to_exec->mapped && "Attempting to execute an unmapped compartment.\n");
 
@@ -559,7 +565,7 @@ comp_clean(struct Compartment* to_clean)
     }
     for (size_t i = 0; i < to_clean->entry_point_count; ++i)
     {
-        free(to_clean->comp_fns[i]->fn_name);
+        free((char*) to_clean->comp_fns[i]->fn_name);
         free(to_clean->comp_fns[i]);
     }
     free(to_clean);

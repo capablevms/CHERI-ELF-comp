@@ -12,6 +12,9 @@
 // vDSO wrapper needed includes
 #include <sys/time.h>
 
+// Third-party libraries
+#include "toml.h"
+
 extern void* __capability manager_ddc;
 
 /*******************************************************************************
@@ -88,6 +91,9 @@ void print_full_cap(uintcap_t);
 // Number of capabilities required to perform a transition
 #define COMP_RETURN_CAPS_COUNT 2
 
+// Compartment configuration file suffix
+extern const char* comp_config_suffix;
+
 // Capabilities required to transition back into the manager once compartment
 // execution has finished
 extern void* __capability comp_return_caps[COMP_RETURN_CAPS_COUNT];
@@ -105,6 +111,21 @@ extern char** environ;
 const char* get_env_str(const char*);
 int manager___vdso_clock_gettime(clockid_t, struct timespec*);
 // END TODO
+
+union arg_holder
+{
+    int i;
+    long l;
+    char c;
+    long long ll;
+    unsigned long long ull;
+};
+
+struct ConfigEntryPoint* parse_compartment_config(FILE*, size_t*);
+void clean_compartment_config(struct ConfigEntryPoint*, size_t);
+struct ConfigEntryPoint get_entry_point(char*, struct ConfigEntryPoint*, size_t);
+void* prepare_compartment_args(char** args, struct ConfigEntryPoint);
+struct ConfigEntryPoint* set_default_entry_point(struct ConfigEntryPoint*);
 
 /*******************************************************************************
  * Memory allocation

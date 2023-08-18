@@ -30,7 +30,7 @@ then
     ssh -o "StrictHostKeyChecking no" -p $CHERIBSD_PORT $CHERIBSD_USER@$CHERIBSD_HOST -t "cd ${CHERIBSD_TEST_DIR} && ./$(basename "$test_name")"
 elif [ "$1" == "prep" ]
 then
-    FILES_TO_PREP=(./tests/manager_call ./tests/manager_args ../tests/hello_world.lua)
+    FILES_TO_PREP=(./tests/manager_call ./tests/manager_args ../tests/hello_world.lua ../tests/args_simple.comp)
     ssh -o "StrictHostKeyChecking no" -p $CHERIBSD_PORT $CHERIBSD_USER@$CHERIBSD_HOST -t "mkdir -p ${CHERIBSD_TEST_DIR}"
     scp -o "StrictHostKeyChecking no" -P $CHERIBSD_PORT "${FILES_TO_PREP[@]}" $CHERIBSD_USER@$CHERIBSD_HOST:${CHERIBSD_TEST_DIR}/
 else

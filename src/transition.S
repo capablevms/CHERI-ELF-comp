@@ -30,7 +30,8 @@ compartment_transition_out:
     ret
 compartment_transition_out_end:
 
-/* comp_exec_in(void* comp_sp, void* __capability comp_ddc, void* fn, void** args, size_t args_count) */
+/* comp_exec_in(void* comp_sp, void* __capability comp_ddc, void* fn,
+                void* args, size_t args_count) */
 /* Instructions to enter a compartment. There is no `ret`, as we need to
  * perform a context switch upon exiting, which is done via `ldpbr`
  */
@@ -47,29 +48,30 @@ comp_exec_in:
 
     // Load params (only handle 3 params):
 loading_params:
-    cbz x4, loaded_params
-    ldr x0, [x3], #8
-    ldr x0, [x0]
-    sub x4, x4, #1
+    cbz  x4, loaded_params // Check if we loaded all parameters
+    bl   load_param
+    mov  x0, x5       // Store one argument
 
-    cbz x4, loaded_params
-    ldr x1, [x3], #8
-    ldr x1, [x1]
-    sub x4, x4, #1
+    cbz  x4, loaded_params
+    bl   load_param
+    mov  x1, x5
 
-    cbz x4, loaded_params
-    ldr x2, [x3], #8
-    ldr x2, [x2]
-    sub x4, x4, #1
+    cbz  x4, loaded_params
+    bl   load_param
+    mov  x2, x5
+    b    loaded_params
 
-    // Clean
+load_param:
+    ldr  x5, [x3]
+    add  x3, x3, #8
+    sub  x4, x4, #1
+    ret
+
 loaded_params:
+    // Clean
     mov x3, xzr
     mov x4, xzr
     mov x5, xzr
-    mov x6, xzr
-    mov x7, xzr
-    mov x8, xzr
 
     mov sp, x9
     msr DDC, c10

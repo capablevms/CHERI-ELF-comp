@@ -3,4 +3,4 @@
 	url = https://github.com/lua/lua/
 [submodule "third-party/tomlc99"]
 	path = third-party/tomlc99
-	url = https://github.com/cktan/tomlc99.git
+	url = https://github.com/cktan/tomlc99
