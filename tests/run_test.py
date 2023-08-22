@@ -41,6 +41,7 @@ def exec_cmd(conn, cmd):
 ################################################################################
 
 vm_conn = Connection(host = CHERIBSD_HOST, user = CHERIBSD_USER, port = CHERIBSD_PORT)
+exec_cmd(vm_conn, f'mkdir -p {CHERIBSD_TEST_DIR}')
 file_deps = [args.test, *args.dependencies]
 for dep in file_deps:
     put_file(vm_conn, dep)

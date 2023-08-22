@@ -1,5 +1,4 @@
-# Loader executable
-
+# Manager executables
 add_executable(manager_call
     ${TEST_DIR}/manager_caller.c
     )
@@ -12,13 +11,39 @@ add_executable(manager_args
 target_include_directories(manager_args PUBLIC ${INCLUDE_DIR} ${TOML_INCLUDE_DIR})
 target_link_libraries(manager_args PUBLIC chcomp)
 
-# Library test functions
-
+# Test properties
 define_property(TARGET
                 PROPERTY compartment
-                BRIEF_DOCS "Whether this target is a CHERI compartment"
-                FULL_DOCS "Whether this target is a CHERI compartment")
+                BRIEF_DOCS "Whether this target is a CHERI compartment."
+                FULL_DOCS "Whether this target is a CHERI compartment.")
 
+define_property(TARGET
+                PROPERTY compartment_config
+                BRIEF_DOCS "A compartment configuration file associated with a compartment source file."
+                FULL_DOCS "A compartment configuration file associated with a compartment source file.")
+
+define_property(TARGET
+                PROPERTY extra_deps
+                BRIEF_DOCS "Additional file dependencies to run a test."
+                FULL_DOCS "Additional file dependencies to run a test.")
+
+# Helper functions
+function(get_deps target deps_var)
+    set(deps_var "")
+    list(APPEND deps_var $<TARGET_FILE:${target}>)
+    get_property(has_config TARGET ${target} PROPERTY compartment_config SET)
+    if(has_config)
+        list(APPEND deps_var $<TARGET_PROPERTY:${target},compartment_config>)
+    endif()
+    get_property(has_deps TARGET ${target} PROPERTY extra_deps SET)
+    if(has_deps)
+        get_property(prop_deps TARGET ${target} PROPERTY extra_deps)
+        list(APPEND deps_var ${prop_deps})
+    endif()
+    set(deps_var ${deps_var} PARENT_SCOPE)
+endfunction()
+
+# Library test functions
 function(new_target test_name compartment)
     add_executable(${test_name}
         ${test_name}.c)
@@ -29,6 +54,9 @@ function(new_target test_name compartment)
         target_compile_options(${test_name} PRIVATE -static)
         target_link_options(${test_name} PRIVATE -static "LINKER:-image-base=0x1000000")
         set_property(TARGET ${test_name} PROPERTY compartment TRUE)
+        if (EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/${test_name}.comp)
+            set_property(TARGET ${test_name} PROPERTY compartment_config ${CMAKE_CURRENT_SOURCE_DIR}/${test_name}.comp)
+        endif()
     else()
         target_link_libraries(${test_name} PRIVATE tomllib)
         target_include_directories(${test_name} PRIVATE ${TOML_INCLUDE_DIR})
@@ -38,23 +66,33 @@ endfunction()
 function(new_test test_name)
     if(${ARGC} EQUAL "1")
         get_property(is_comp TARGET ${test_name} PROPERTY compartment SET)
+        get_deps(${test_name} deps_var)
         if(is_comp)
             add_test(NAME ${test_name}
-                     #COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.sh comp $<TARGET_FILE:${test_name}>)
-                     COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.py manager_call $<TARGET_FILE:${test_name}>)
+                     COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.py
+                             manager_call
+                             --test-args $<TARGET_FILE_NAME:${test_name}>
+                             --dependencies ${deps_var}
+                     COMMAND_EXPAND_LISTS)
         else()
             add_test(NAME ${test_name}
-                     #COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.sh test $<TARGET_FILE:${test_name}>)
-                     COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.sh $<TARGET_FILE:${test_name}>)
+                     COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.py
+                             $<TARGET_FILE_NAME:${test_name}>
+                             --dependencies ${deps_var}
+                     COMMAND_EXPAND_LISTS)
         endif()
     elseif(${ARGC} GREATER_EQUAL "3")
         set(test_bin ${ARGV1})
         list(JOIN ARGV2 " " test_args)
         get_property(is_comp TARGET ${test_bin} PROPERTY compartment SET)
+        get_deps(${test_bin} deps_var)
         if(is_comp)
             add_test(NAME ${test_name}
-                #COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.sh comp $<TARGET_FILE:${test_bin}> ${test_args})
-                COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.py manager_args $<TARGET_FILE:${test_bin}> --test-args ${test_args})
+                COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.py
+                        manager_args
+                        --test-args $<TARGET_FILE_NAME:${test_bin}> ${test_args}
+                        --dependencies ${deps_var}
+                COMMAND_EXPAND_LISTS)
         else()
             message(FATAL_ERROR "Shouldn't get here")
         endif()
@@ -63,10 +101,14 @@ function(new_test test_name)
     endif()
 endfunction()
 
+function(new_dependency target dep_file)
+    set_property(TARGET ${target} APPEND PROPERTY extra_deps ${dep_file})
+endfunction()
+
 function(two_comp_test test_bin comp1 comp2)
     add_executable(${test_bin} ${test_bin}.c)
     target_link_libraries(${test_bin} PRIVATE chcomp dl m lualib)
-    target_include_directories(${test_bin} PRIVATE ${INCLUDE_DIR} ${LUA_INCLUDE_DIR})
+    target_include_directories(${test_bin} PRIVATE ${INCLUDE_DIR} ${LUA_INCLUDE_DIR} ${TOML_INCLUDE_DIR})
     add_executable(${comp1} ${comp1}.c)
     target_compile_options(${comp1} PRIVATE -static)
     target_link_options(${comp1} PRIVATE -static "LINKER:-image-base=0x1000000")
@@ -96,6 +138,8 @@ set(tests
     "time"
     "lua_simple"
     "lua_script"
+    "test_map"
+    "test_args_near_unmapped"
     "args-simple args_simple check_simple 40 2"
     "args-more args_simple check_simple 40 2 2 2" # Check additional arguments are ignored
     "args-combined args_simple check_combined 400 2 20"
@@ -103,13 +147,11 @@ set(tests
     "args-long-max args_simple check_llong_max 9223372036854775807"
     "args-long-min args_simple check_llong_min -9223372036854775808"
     "args-ulong-max args_simple check_ullong_max 18446744073709551615"
-    # Order matters, as these depend on some files to be copied in earlier tests
-    "test_map"
-    "test_args_near_unmapped"
     )
 
-two_comp_test(test_two_comps test_two_comps-comp1 test_two_comps-comp2)
+#two_comp_test(test_two_comps test_two_comps-comp1 test_two_comps-comp2)
 
+# Build targets
 foreach(comp_t IN LISTS comp_binaries)
     new_target(${comp_t} TRUE)
 endforeach()
@@ -118,6 +160,12 @@ foreach(func_t IN LISTS func_binaries)
     new_target(${func_t} FALSE)
 endforeach()
 
+# Additional dependencies
+new_dependency(lua_script ${CMAKE_CURRENT_SOURCE_DIR}/hello_world.lua)
+new_dependency(test_args_near_unmapped $<TARGET_FILE:args_simple>)
+new_dependency(test_args_near_unmapped ${CMAKE_CURRENT_SOURCE_DIR}/args_simple.comp)
+
+# Prepare tests
 foreach(test_t IN LISTS tests)
     string(REPLACE " " ";" test_t_list ${test_t})
     list(LENGTH test_t_list test_t_len)

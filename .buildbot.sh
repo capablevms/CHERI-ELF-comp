@@ -4,7 +4,8 @@ set -e
 
 build_dir="$(pwd)/build"
 src_dir="$(pwd)"
-cheri_dir="/home/buildbot/cheri/output"
+cheri_dir="$HOME/cheri/output"
+venv_dir="./buildbot-venv"
 
 # Update submodules
 git submodule update --init
@@ -16,6 +17,10 @@ patch -d $lua_dir -i ../lua.patch
 # Apply toml patch
 toml_dir="$src_dir/third-party/tomlc99"
 patch -d $toml_dir -i ../tomlc99.patch
+
+# Prepare python virtual env
+export PATH=$PATH:$HOME/.local/bin
+pip3 install --break-system-packages fabric
 
 # Build project locally
 export CC=$cheri_dir/morello-sdk/bin/clang
