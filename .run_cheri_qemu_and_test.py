@@ -26,7 +26,6 @@ def run_tests(qemu: boot_cheribsd.QemuCheriBSDInstance, args: argparse.Namespace
 
     # Run command on host to test the executed client
     os.chdir(f"{args.build_dir}/build")
-    subprocess.run([f"{args.build_dir}/tests/run_test.sh", "prep"], check=True)
     subprocess.run(["ctest", "--output-on-failure"], check=True)
     return True
 

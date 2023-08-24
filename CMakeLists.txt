@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.6)
+cmake_minimum_required(VERSION 3.16)
 project(CHERI_ELF_Compartments LANGUAGES C ASM)
 
 set(TEST_DIR ${CMAKE_SOURCE_DIR}/tests)
