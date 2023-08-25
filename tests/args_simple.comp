@@ -1,23 +1,17 @@
 [check_simple]
-args_count = 2
 args_type = ["int", "int"]
 
 [check_combined]
-args_count = 3
 args_type = ["int", "char", "long"]
 
 [check_negative]
-args_count = 1
 args_type = ["int"]
 
 [check_llong_max]
-args_count = 1
 args_type = ["long long"]
 
 [check_llong_min]
-args_count = 1
 args_type = ["long long"]
 
 [check_ullong_max]
-args_count = 1
 args_type = ["unsigned long long"]

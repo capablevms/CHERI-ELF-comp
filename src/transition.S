@@ -38,7 +38,22 @@ compartment_transition_out_end:
 .global comp_exec_in
 .type comp_exec_in, "function"
 comp_exec_in:
-    stp lr, x29, [sp, #-16]!
+    /* Store data required to be restored later
+    /  - `x19` is callee-saved, used to hold the stack pointer between
+         `comp_exec_in` and `comp_exec_out`
+       - `lr` is used to remember where we came from, so we can return
+       - `x29` is used for TODO???
+
+       Stack layout:
+       `SP + 5 * 8` -->  ------------------
+       `SP + 4 * 8` --> |    < PADDING >   |
+       `SP + 3 * 8`   > |      old x29     |
+       `SP + 2 * 8`   > |      old LR      |
+       `SP + 1 * 8`   > | callee-saved x19 |
+       `    new SP`   >  ------------------
+    */
+    stp x19, lr, [sp, #-32]!
+    str x29, [sp, #16]
     mov x19, sp
 
     // Move arguments to temporary registers (we'll need them later)
@@ -85,11 +100,15 @@ loaded_params:
  *
  * Expects `DDC` in c29, resets `sp` and `clr` to continue execution for the
  * manager. The result of the compartment is expected in `x0`.
+ *
+ * This function should only be called from `comp_exec_in`, after the
+ * compartment has finished executing.
  */
 .global comp_exec_out
 .type comp_exec_out, "function"
 comp_exec_out:
     msr DDC, c29
     mov sp, x19
-    ldp lr, x29, [sp], #16
+    ldp x19, lr, [sp], #32
+    ldr x29, [sp, #-16]
     ret

@@ -52,7 +52,11 @@ function(new_target test_name compartment)
     target_include_directories(${test_name} PRIVATE ${INCLUDE_DIR} ${LUA_INCLUDE_DIR})
     if(${compartment})
         target_compile_options(${test_name} PRIVATE -static)
-        target_link_options(${test_name} PRIVATE -static "LINKER:-image-base=0x1000000")
+        if(${ARGC} GREATER 2)
+            target_link_options(${test_name} PRIVATE -static "LINKER:-image-base=${ARGV2}")
+        else()
+            target_link_options(${test_name} PRIVATE -static "LINKER:-image-base=0x1000000")
+        endif()
         set_property(TARGET ${test_name} PROPERTY compartment TRUE)
         if (EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/${test_name}.comp)
             set_property(TARGET ${test_name} PROPERTY compartment_config ${CMAKE_CURRENT_SOURCE_DIR}/${test_name}.comp)
@@ -105,24 +109,12 @@ function(new_dependency target dep_file)
     set_property(TARGET ${target} APPEND PROPERTY extra_deps ${dep_file})
 endfunction()
 
-function(two_comp_test test_bin comp1 comp2)
-    add_executable(${test_bin} ${test_bin}.c)
-    target_link_libraries(${test_bin} PRIVATE chcomp dl m lualib)
-    target_include_directories(${test_bin} PRIVATE ${INCLUDE_DIR} ${LUA_INCLUDE_DIR} ${TOML_INCLUDE_DIR})
-    add_executable(${comp1} ${comp1}.c)
-    target_compile_options(${comp1} PRIVATE -static)
-    target_link_options(${comp1} PRIVATE -static "LINKER:-image-base=0x1000000")
-    add_executable(${comp2} ${comp2}.c)
-    target_compile_options(${comp2} PRIVATE -static)
-    target_link_options(${comp2} PRIVATE -static "LINKER:-image-base=0x2000000")
-    add_test(NAME test_two_comp-${test_bin}
-        COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.py $<TARGET_FILE:${test_bin}> --dependencies $<TARGET_FILE:${comp1}> $<TARGET_FILE:${comp2}>)
-endfunction()
-
 # Library tests
 set(func_binaries
     "test_map"
     "test_args_near_unmapped"
+    "test_two_comps"
+    "test_two_comps_inter_call"
     )
 
 set(comp_binaries
@@ -131,6 +123,8 @@ set(comp_binaries
     "lua_simple"
     "lua_script"
     "args_simple"
+    "test_two_comps-comp1"
+    "test_two_comps-comp2 0x2000000"
     )
 
 set(tests
@@ -140,6 +134,8 @@ set(tests
     "lua_script"
     "test_map"
     "test_args_near_unmapped"
+    "test_two_comps"
+    "test_two_comps_inter_call"
     "args-simple args_simple check_simple 40 2"
     "args-more args_simple check_simple 40 2 2 2" # Check additional arguments are ignored
     "args-combined args_simple check_combined 400 2 20"
@@ -149,11 +145,18 @@ set(tests
     "args-ulong-max args_simple check_ullong_max 18446744073709551615"
     )
 
-#two_comp_test(test_two_comps test_two_comps-comp1 test_two_comps-comp2)
 
 # Build targets
 foreach(comp_t IN LISTS comp_binaries)
-    new_target(${comp_t} TRUE)
+    string(FIND ${comp_t} " " space_pos)
+    if(${space_pos} EQUAL -1)
+        new_target(${comp_t} TRUE)
+    else()
+        string(SUBSTRING ${comp_t} 0 ${space_pos} tgt_name)
+        string(SUBSTRING ${comp_t} ${space_pos} -1 img_base)
+        string(STRIP ${img_base} img_base)
+        new_target(${tgt_name} TRUE ${img_base})
+    endif()
 endforeach()
 
 foreach(func_t IN LISTS func_binaries)
@@ -164,6 +167,14 @@ endforeach()
 new_dependency(lua_script ${CMAKE_CURRENT_SOURCE_DIR}/hello_world.lua)
 new_dependency(test_args_near_unmapped $<TARGET_FILE:args_simple>)
 new_dependency(test_args_near_unmapped ${CMAKE_CURRENT_SOURCE_DIR}/args_simple.comp)
+
+new_dependency(test_two_comps $<TARGET_FILE:test_two_comps-comp1>)
+new_dependency(test_two_comps $<TARGET_FILE:test_two_comps-comp2>)
+new_dependency(test_two_comps ${CMAKE_CURRENT_SOURCE_DIR}/test_two_comps-comp1.comp)
+
+new_dependency(test_two_comps_inter_call $<TARGET_FILE:test_two_comps-comp1>)
+new_dependency(test_two_comps_inter_call $<TARGET_FILE:test_two_comps-comp2>)
+new_dependency(test_two_comps_inter_call ${CMAKE_CURRENT_SOURCE_DIR}/test_two_comps-comp1.comp)
 
 # Prepare tests
 foreach(test_t IN LISTS tests)

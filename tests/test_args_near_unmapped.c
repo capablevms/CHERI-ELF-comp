@@ -20,20 +20,13 @@ main(int argc, char** argv)
     setup_intercepts();
 
     char* file = "args_simple";
-    char* file_config = malloc(sizeof(file) + sizeof(comp_config_suffix) + 1);
-    strcpy(file_config, file);
-    strcat(file_config, comp_config_suffix);
-    FILE* comp_config_fd = fopen(file_config, "r");
-    free(file_config);
-    struct ConfigEntryPoint* cep = NULL;
     size_t entry_point_count = 0;
-    char** entry_points = NULL;
-    if (comp_config_fd)
+    struct ConfigEntryPoint* cep = parse_compartment_config(file, &entry_point_count);
+    if (!cep)
     {
-        cep = parse_compartment_config(comp_config_fd, &entry_point_count);
-        fclose(comp_config_fd);
+        cep = malloc(sizeof(struct ConfigEntryPoint));
+        cep = set_default_entry_point(cep);
     }
-    // TODO else set main as default entry point
 
     struct Compartment* arg_comp = comp_from_elf(file, cep, entry_point_count);
     loaded_comp = arg_comp; // TODO
