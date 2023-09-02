@@ -137,6 +137,13 @@ my_fprintf(FILE* stream, const char* format, ...)
     return res;
 }
 
+size_t
+my_call_comp(size_t comp_id, char* fn_name, void* args, size_t args_count)
+{
+    struct Compartment* to_call = manager_get_compartment_by_id(comp_id);
+    return comp_exec(to_call, fn_name, args, args_count);
+}
+
 /*******************************************************************************
  * Utility functions
  ******************************************************************************/
@@ -181,7 +188,7 @@ setup_intercepts()
                 : /**/ );
         comp_intercept_funcs[i].redirect_cap = sealed_redirect_cap;
     }
-    comp_return_caps[0] = manager_ddc;
+    comp_return_caps[0] = manager_ddc; // TODO does this need to be sealed?
     comp_return_caps[1] = cheri_address_set(cheri_pcc_get(), (uintptr_t) comp_exec_out);
 }
 
@@ -197,6 +204,12 @@ manager_find_compartment_by_ddc(void* __capability ddc)
     return loaded_comp; // TODO
 }
 
+struct Compartment*
+manager_get_compartment_by_id(size_t id)
+{
+    return comps[id];
+}
+
 void
 toml_parse_error(char* error_msg, char* errbuf)
 {
@@ -204,9 +217,34 @@ toml_parse_error(char* error_msg, char* errbuf)
     exit(1);
 }
 
-struct ConfigEntryPoint*
-parse_compartment_config(FILE* config_fd, size_t* entry_point_count)
+char*
+prep_config_filename(char* filename)
 {
+    const char* prefix = "./";
+    if (!strncmp(filename, prefix, strlen(prefix)))
+    {
+        filename += strlen(prefix);
+    }
+    const char* suffix_to_add = ".comp";
+    char* config_filename = malloc(strlen(filename) + strlen(suffix_to_add) + 1);
+    strcpy(config_filename, filename);
+    strcat(config_filename, suffix_to_add);
+    return config_filename;
+}
+
+struct ConfigEntryPoint*
+parse_compartment_config(char* comp_filename, size_t* entry_point_count)
+{
+    // Get config file name
+    char* config_filename = prep_config_filename(comp_filename);
+    FILE* config_fd = fopen(config_filename,"r");
+    free(config_filename);
+    if (!config_fd)
+    {
+        return NULL;
+    }
+
+    // Parse config file
     char toml_errbuf[200];
     toml_table_t* tab = toml_parse_file(config_fd, toml_errbuf, sizeof(toml_errbuf));
     if (!tab)
@@ -221,21 +259,21 @@ parse_compartment_config(FILE* config_fd, size_t* entry_point_count)
         assert(fname);
         toml_table_t* curr_func = toml_table_in(tab, fname);
         assert(curr_func);
-        toml_datum_t func_arg_count = toml_int_in(curr_func, "args_count");
-        assert(func_arg_count.ok);
         toml_array_t* func_arg_types = toml_array_in(curr_func, "args_type");
         assert(func_arg_types);
+        size_t func_arg_count = toml_array_nelem(func_arg_types);
 
         entry_points[i].name = fname;
-        entry_points[i].arg_count = func_arg_count.u.i;
-        entry_points[i].args_type = malloc(func_arg_count.u.i * sizeof(char*));
-        for (size_t j = 0; j < toml_array_nelem(func_arg_types); ++j)
+        entry_points[i].arg_count = func_arg_count;
+        entry_points[i].args_type = malloc(func_arg_count * sizeof(char*));
+        for (size_t j = 0; j < func_arg_count; ++j)
         {
             toml_datum_t func_arg_type = toml_string_at(func_arg_types, j);
             entry_points[i].args_type[j] = malloc(strlen(func_arg_type.u.s) + 1);
             strcpy(entry_points[i].args_type[j], func_arg_type.u.s);
         }
     }
+    fclose(config_fd);
     return entry_points;
 }
 

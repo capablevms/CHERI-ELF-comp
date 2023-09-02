@@ -56,22 +56,26 @@ void* my_malloc(size_t);
 void my_free(void*);
 int my_fprintf(FILE*, const char*, ...);
 
+size_t my_call_comp(size_t, char*, void*, size_t);
+
 static const struct func_intercept to_intercept_funcs[] = {
     /* vDSO funcs */
-    { "time"    , (uintptr_t) manager_time    },
+    { "time"     , (uintptr_t) manager_time    },
     /* Mem funcs */
-    { "malloc"  , (uintptr_t) my_malloc       },
-    { "realloc" , (uintptr_t) my_realloc      },
-    { "free"    , (uintptr_t) my_free         },
-    { "fprintf" , (uintptr_t) my_fprintf      },
+    { "malloc"   , (uintptr_t) my_malloc       },
+    { "realloc"  , (uintptr_t) my_realloc      },
+    { "free"     , (uintptr_t) my_free         },
+    { "fprintf"  , (uintptr_t) my_fprintf      },
+    /* Compartment funcs */
+    { "call_comp", (uintptr_t) my_call_comp    },
     /* Other funcs */
-    { "fopen"   , (uintptr_t) manager_fopen   },
-    { "fread"   , (uintptr_t) manager_fread   },
-    { "fwrite"  , (uintptr_t) manager_fwrite  },
-    { "fclose"  , (uintptr_t) manager_fclose  },
-    { "getc"    , (uintptr_t) manager_getc    },
-    { "fputc"   , (uintptr_t) manager_fputc   },
-    { "__srget" , (uintptr_t) manager___srget },
+    { "fopen"    , (uintptr_t) manager_fopen   },
+    { "fread"    , (uintptr_t) manager_fread   },
+    { "fwrite"   , (uintptr_t) manager_fwrite  },
+    { "fclose"   , (uintptr_t) manager_fclose  },
+    { "getc"     , (uintptr_t) manager_getc    },
+    { "fputc"    , (uintptr_t) manager_fputc   },
+    { "__srget"  , (uintptr_t) manager___srget },
 };
 //
 // Functions to be intercepted and associated data
@@ -100,6 +104,7 @@ extern void* __capability comp_return_caps[COMP_RETURN_CAPS_COUNT];
 
 struct Compartment* manager_find_compartment_by_addr(void*);
 struct Compartment* manager_find_compartment_by_ddc(void* __capability);
+struct Compartment* manager_get_compartment_by_id(size_t);
 
 #include "compartment.h"
 
@@ -121,7 +126,8 @@ union arg_holder
     unsigned long long ull;
 };
 
-struct ConfigEntryPoint* parse_compartment_config(FILE*, size_t*);
+char* prep_config_filename(char*);
+struct ConfigEntryPoint* parse_compartment_config(char*, size_t*);
 void clean_compartment_config(struct ConfigEntryPoint*, size_t);
 struct ConfigEntryPoint get_entry_point(char*, struct ConfigEntryPoint*, size_t);
 void* prepare_compartment_args(char** args, struct ConfigEntryPoint);

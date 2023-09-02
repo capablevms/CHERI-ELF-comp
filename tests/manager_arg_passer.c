@@ -12,17 +12,6 @@
 
 extern struct Compartment* loaded_comp;
 
-char*
-prep_filename(char* filename)
-{
-    const char* prefix = "./";
-    if (!strncmp(filename, prefix, strlen(prefix)))
-    {
-        filename += strlen(prefix);
-    }
-    return filename;
-}
-
 int
 main(int argc, char** argv)
 {
@@ -31,21 +20,14 @@ main(int argc, char** argv)
     setup_intercepts();
 
     assert(argc >= 4 && "Expect at least three arguments: binary file for compartment, entry function for compartment, and at least one argument to pass to compartment function.");
-    char* file = prep_filename(argv[1]);
-    char* file_config = malloc(sizeof(file) + sizeof(comp_config_suffix) + 1);
-    strcpy(file_config, file);
-    strcat(file_config, comp_config_suffix);
-    FILE* comp_config_fd = fopen(file_config, "r");
-    free(file_config);
-    struct ConfigEntryPoint* cep = NULL;
+    char* file = argv[1];
     size_t entry_point_count = 0;
-    char** entry_points = NULL;
-    if (comp_config_fd)
+    struct ConfigEntryPoint* cep = parse_compartment_config(file, &entry_point_count);
+    if (!cep)
     {
-        cep = parse_compartment_config(comp_config_fd, &entry_point_count);
-        fclose(comp_config_fd);
+        cep = malloc(sizeof(struct ConfigEntryPoint));
+        cep = set_default_entry_point(cep);
     }
-    // TODO else set main as default entry point
 
     struct Compartment* arg_comp = comp_from_elf(file, cep, entry_point_count);
     loaded_comp = arg_comp; // TODO
@@ -54,10 +36,10 @@ main(int argc, char** argv)
 
     char* entry_func = argv[2];
     char** entry_func_args = &argv[3];
-    struct ConfigEntryPoint comp_entry = get_entry_point(entry_func, cep, entry_point_count);
+    struct ConfigEntryPoint comp_entry = get_entry_point(entry_func, cep, arg_comp->entry_point_count);
     void* comp_args = prepare_compartment_args(entry_func_args, comp_entry);
     int comp_result = comp_exec(arg_comp, entry_func, comp_args, comp_entry.arg_count);
-    clean_compartment_config(cep, entry_point_count);
+    clean_compartment_config(cep, arg_comp->entry_point_count);
     comp_clean(arg_comp);
     return comp_result;
 }

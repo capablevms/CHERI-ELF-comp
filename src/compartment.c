@@ -71,10 +71,6 @@ comp_from_elf(char* filename, struct ConfigEntryPoint* entry_points, size_t entr
     new_comp->elf_type = comp_ehdr.e_type;
     assert(new_comp->elf_type == ET_DYN || new_comp->elf_type == ET_EXEC);
 
-    const unsigned long new_comp_base = 0x1000000UL; // TODO
-    assert(new_comp_base % new_comp->page_size == 0);
-    new_comp->base = new_comp_base;
-
     struct stat elf_fd_stat;
     fstat(new_comp->fd, &elf_fd_stat);
     new_comp->size = elf_fd_stat.st_size;
@@ -84,6 +80,7 @@ comp_from_elf(char* filename, struct ConfigEntryPoint* entry_points, size_t entr
     // Read program headers
     Elf64_Phdr comp_phdr;
     size_t align_size_correction;
+    bool first_load_header = true;
     for (size_t i = 0; i < comp_ehdr.e_phnum; ++i)
     {
         pread_res = pread((int) new_comp->fd, &comp_phdr, sizeof(comp_phdr),
@@ -103,12 +100,23 @@ comp_from_elf(char* filename, struct ConfigEntryPoint* entry_points, size_t entr
             continue;
         }
 
+        // Compute loading address of compartment
+        // TODO empirically, the first `LOAD` program header seems to expect to be
+        // loaded at the lowest address; is this correct?
+        if (first_load_header)
+        {
+            const unsigned long new_comp_base = comp_phdr.p_vaddr;
+            assert(new_comp_base % new_comp->page_size == 0);
+            new_comp->base = new_comp_base;
+            first_load_header = false;
+        }
+
         struct SegmentMap* this_seg =
             (struct SegmentMap*) malloc(sizeof(struct SegmentMap));
         assert(this_seg != NULL);
         if (new_comp->elf_type == ET_DYN /*|| new_comp->elf_type == ET_EXEC*/) // TODO distinguish PIE exec vs non-PIE exec
         {
-            unsigned long curr_seg_base = new_comp_base + comp_phdr.p_vaddr;
+            unsigned long curr_seg_base = new_comp->base + comp_phdr.p_vaddr;
             this_seg->mem_bot = align_down(curr_seg_base, new_comp->page_size);
             align_size_correction = curr_seg_base - this_seg->mem_bot;
             this_seg->mem_top = curr_seg_base + comp_phdr.p_memsz;
