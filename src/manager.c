@@ -2,7 +2,7 @@
 
 const char* comp_env_fields[] = { "PATH", };
 void* __capability comp_return_caps[COMP_RETURN_CAPS_COUNT];
-void* __capability manager_ddc = NULL;
+void* __capability manager_ddc = 0;
 struct Compartment* loaded_comp = NULL; // TODO
 struct func_intercept comp_intercept_funcs[INTERCEPT_FUNC_COUNT];
 
@@ -83,6 +83,7 @@ manager_getc(FILE* stream)
     return getc(stream);
 }
 
+// Needed by test `lua_script`
 int
 manager___srget(FILE* stream)
 {
@@ -183,8 +184,8 @@ setup_intercepts()
             cheri_address_set(cheri_pcc_get(), (uintptr_t) intercept_wrapper);
         void* __capability sealed_redirect_cap =
             cheri_address_set(manager_ddc, (uintptr_t) &comp_intercept_funcs[i].intercept_ddc);
-        asm("SEAL %w[cap], %w[cap], lpb\n\t"
-                : [cap]"+r"(sealed_redirect_cap)
+        asm("SEAL %[cap], %[cap], lpb\n\t"
+                : [cap]"+C"(sealed_redirect_cap)
                 : /**/ );
         comp_intercept_funcs[i].redirect_cap = sealed_redirect_cap;
     }

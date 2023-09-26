@@ -7,19 +7,18 @@
 #include <dlfcn.h>
 #include <sys/auxv.h>
 #include <stdarg.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 // vDSO wrapper needed includes
-#include <sys/time.h>
+#include <time.h>
 
 // Third-party libraries
 #include "toml.h"
 
 extern void* __capability manager_ddc;
-
-/*******************************************************************************
- * Intercepts
- ******************************************************************************/
 
 /* Data required to perform the transition for an intercepted function
  */
@@ -57,7 +56,6 @@ void my_free(void*);
 int my_fprintf(FILE*, const char*, ...);
 
 size_t my_call_comp(size_t, char*, void*, size_t);
-
 static const struct func_intercept to_intercept_funcs[] = {
     /* vDSO funcs */
     { "time"     , (uintptr_t) manager_time    },

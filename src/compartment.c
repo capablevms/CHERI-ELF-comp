@@ -408,12 +408,13 @@ comp_stack_push(struct Compartment* comp, const void* to_push, size_t to_push_sz
     assert(comp->stack_pointer > comp->scratch_mem_stack_top - comp->scratch_mem_stack_size);
 }
 
-void
-comp_stack_auxval_push(struct Compartment* comp, uint64_t at_type, uint64_t at_val)
-{
-    Elf64_Auxinfo new_auxv = {at_type, {at_val} };
-    comp_stack_push(comp, &new_auxv, sizeof(new_auxv));
-}
+// TODO code needed if we reimplement auxp/envp for the loader
+/*void*/
+/*comp_stack_auxval_push(struct Compartment* comp, uint64_t at_type, uint64_t at_val)*/
+/*{*/
+    /*Elf64_Auxinfo new_auxv = {at_type, {at_val} };*/
+    /*comp_stack_push(comp, &new_auxv, sizeof(new_auxv));*/
+/*}*/
 
 /* Map a struct Compartment into memory, making it ready for execution
  */

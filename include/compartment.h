@@ -17,6 +17,13 @@
 
 #include "manager.h"
 
+// Morello `gcc` defines `ptraddr_t` in `stddef.h`, while `clang` does so in
+// `stdint.h`
+// TODO are there any other diverging definition files?
+#if defined(__GNUC__) && !defined(__clang__)
+#include <stddef.h>
+#endif
+
 #define align_down(x, align)    __builtin_align_down(x, align)
 #define align_up(x, align)      __builtin_align_up(x, align)
 
@@ -62,7 +69,7 @@ struct intercept_patch
 // using `x` registers in `loading_params` in `transition.S`. This should be
 // the equivalent of checking for a 64-bit CHERI aware platform
 // TODO is there a better way to check?
-#if !(__LP64__ && __has_feature(capabilities))
+#if !(__LP64__ && defined(__CHERI__))
 #error Expecting 64-bit Arm Morello platform
 #endif
 
