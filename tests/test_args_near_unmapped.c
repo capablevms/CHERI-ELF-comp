@@ -10,8 +10,6 @@
  * but plan to move this to some configuration file in the near future
  */
 
-extern struct Compartment* loaded_comp;
-
 int
 main(int argc, char** argv)
 {
@@ -20,17 +18,8 @@ main(int argc, char** argv)
     setup_intercepts();
 
     char* file = "args_simple";
-    size_t entry_point_count = 0;
-    struct ConfigEntryPoint* cep = parse_compartment_config(file, &entry_point_count);
-    if (!cep)
-    {
-        cep = malloc(sizeof(struct ConfigEntryPoint));
-        cep = set_default_entry_point(cep);
-    }
 
-    struct Compartment* arg_comp = comp_from_elf(file, cep, entry_point_count);
-    loaded_comp = arg_comp; // TODO
-    log_new_comp(arg_comp);
+    struct Compartment* arg_comp = register_new_comp(file, false);
     comp_map(arg_comp);
 
     char* entry_func = "check_simple";

@@ -2,8 +2,10 @@
 .balign 4
 
 /* Wrapper to an intercept function, executed within a manager context;
- * required in order to maintain a consisten execution state. This also manages
+ * required in order to maintain a consistent execution state. This also manages
  * setting the `DDC` as needed.
+ *
+ * This function takes `x10` as argument, pointing to the address to jump to
  */
 .global intercept_wrapper
 .type intercept_wrapper, "function"
@@ -24,6 +26,7 @@ intercept_wrapper:
 .global compartment_transition_out
 .type compartment_transition_out, "function"
 compartment_transition_out:
+    // TODO
     stp c29, clr, [sp, #-32]!
     ldpblr c29, [c11]
     ldp c29, clr, [sp], #32
@@ -31,7 +34,8 @@ compartment_transition_out:
 compartment_transition_out_end:
 
 /* comp_exec_in(void* comp_sp, void* __capability comp_ddc, void* fn,
-                void* args, size_t args_count) */
+                void* args, size_t args_count,
+                void* __capability sealed_redirect_cap) */
 /* Instructions to enter a compartment. There is no `ret`, as we need to
  * perform a context switch upon exiting, which is done via `ldpbr`
  */
@@ -42,15 +46,15 @@ comp_exec_in:
     /  - `x19` is callee-saved, used to hold the stack pointer between
          `comp_exec_in` and `comp_exec_out`
        - `lr` is used to remember where we came from, so we can return
-       - `x29` is used for TODO???
+       - `x29` is the frame-pointer, to be restored on exit
 
        Stack layout:
-       `SP + 5 * 8` -->  ------------------
-       `SP + 4 * 8` --> |    < PADDING >   |
-       `SP + 3 * 8`   > |      old x29     |
-       `SP + 2 * 8`   > |      old LR      |
-       `SP + 1 * 8`   > | callee-saved x19 |
-       `    new SP`   >  ------------------
+       `SP + 5 * 8` -->  ---------------------
+       `SP + 4 * 8` --> |      <PADDING>      |
+       `SP + 3 * 8`   > |       old x29       |
+       `SP + 2 * 8`   > |       old  LR       |
+       `SP + 1 * 8`   > |  callee-saved  x19  |
+       `    new SP`   >  ---------------------
     */
     stp x19, lr, [sp, #-32]!
     str x29, [sp, #16]
@@ -60,8 +64,10 @@ comp_exec_in:
     mov x9, x0
     mov c10, c1
     mov x11, x2
+    mov c20, c5
 
     // Load params (only handle 3 params):
+    // TODO increase to 6
 loading_params:
     cbz  x4, loaded_params // Check if we loaded all parameters
     bl   load_param
@@ -88,12 +94,19 @@ loaded_params:
     mov x4, xzr
     mov x5, xzr
 
+    // Transition into new compartment
     mov sp, x9
     msr DDC, c10
+    // We are now fully in the new context
+
+    // Save capability needed to restore context
+    // TODO I think this should be somewhere within the compartment
+    str c20, [sp, #-32]!
+
+    // Call required function within compartment
     blr x11
 
-    adr x11, comp_return_caps
-    cvtp c11, x11
+    ldr c11, [sp]
     ldpbr c29, [c11]
 
 /* Instructions to perform once a compartment has finished execution.

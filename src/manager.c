@@ -1,12 +1,27 @@
 #include "manager.h"
 
+// TODO consider moving to a struct or some global thing
+static size_t comps_count = 0;
+struct CompWithEntries** comps;
+struct Compartment* loaded_comp = NULL;
+
+// Variables and functions related to laying compartments in memory
+// TODO make start address configurable
+const uintptr_t comp_start_addr = 0x1000000UL;
+const unsigned short comp_page_interval_count = 2;
+void* min_next_comp_addr = NULL;
+
 const char* comp_env_fields[] = { "PATH", };
-void* __capability comp_return_caps[COMP_RETURN_CAPS_COUNT];
 void* __capability manager_ddc = 0;
-struct Compartment* loaded_comp = NULL; // TODO
-struct func_intercept comp_intercept_funcs[INTERCEPT_FUNC_COUNT];
 
 const char* comp_config_suffix = ".comp";
+
+static struct ConfigEntryPoint* parse_compartment_config(char*, size_t*, bool);
+static struct ConfigEntryPoint* make_default_entry_point();
+static struct ConfigEntryPoint get_entry_point(char*, struct ConfigEntryPoint*, size_t);
+static void* prepare_compartment_args(char** args, struct ConfigEntryPoint);
+
+static struct CompWithEntries* get_comp_with_entries(struct Compartment*);
 
 const char*
 get_env_str(const char* env_name)
@@ -18,131 +33,6 @@ get_env_str(const char* env_name)
             return str;
     }
     return NULL;
-}
-
-/*******************************************************************************
- * Intercept functions
- *
- * These functions are meant to be executed within a manager context, by
- * intercepting certain functions within compartments which must have higher
- * privlige
- ******************************************************************************/
-
-time_t
-manager_time(time_t* t)
-{
-    return time(t);
-}
-
-/* As we are performing data compartmentalization, we must store relevant
- * information for accessing an opened file within compartment memory. However,
- * as we are using a bump allocator for internal memory management, we do not
- * have the capability of `free`ing this memory. A future implementation of a
- * better memory allocator will resolve this issue.
- */
-FILE*
-manager_fopen(const char* filename, const char* mode)
-{
-    FILE* res = fopen(filename, mode);
-    assert(res != NULL);
-    struct Compartment* comp = manager_find_compartment_by_ddc(cheri_ddc_get()); // TODO
-    void* comp_addr = manager_register_mem_alloc(comp, sizeof(FILE));
-    memcpy(comp_addr, res, sizeof(FILE));
-    return comp_addr;
-}
-
-size_t
-manager_fread(void* __restrict buf, size_t size, size_t count, FILE* __restrict fp)
-{
-    return fread(buf, size, count, fp);
-}
-
-size_t
-manager_fwrite(void* __restrict buf, size_t size, size_t count, FILE* __restrict fp)
-{
-    return fwrite(buf, size, count, fp);
-}
-
-int
-manager_fputc(int chr, FILE* stream)
-{
-    return fputc(chr, stream);
-}
-
-int
-manager_fclose(FILE* fp)
-{
-    int res = fclose(fp);
-    assert(res == 0);
-    return res;
-}
-
-int
-manager_getc(FILE* stream)
-{
-    return getc(stream);
-}
-
-// Needed by test `lua_script`
-int
-manager___srget(FILE* stream)
-{
-    return __srget(stream);
-}
-
-void*
-my_realloc(void* ptr, size_t to_alloc)
-{
-    struct Compartment* comp = manager_find_compartment_by_ddc(cheri_ddc_get());
-
-    if (ptr == NULL)
-    {
-        return my_malloc(to_alloc); // TODO
-    }
-
-    void* new_ptr = manager_register_mem_alloc(comp, to_alloc);
-    struct mem_alloc* old_alloc = get_alloc_struct_from_ptr(comp, (uintptr_t) ptr);
-    memcpy(new_ptr, ptr, to_alloc < old_alloc->size ? to_alloc : old_alloc->size);
-    manager_free_mem_alloc(comp, ptr);
-    return new_ptr;
-}
-
-void*
-my_malloc(size_t to_alloc)
-{
-    struct Compartment* comp = manager_find_compartment_by_ddc(cheri_ddc_get());
-    assert(comp->scratch_mem_alloc + to_alloc < comp->scratch_mem_size);
-    void* new_mem = manager_register_mem_alloc(comp, to_alloc);
-    return new_mem;
-}
-
-void
-my_free(void* ptr)
-{
-    if (ptr == NULL)
-    {
-        return;
-    }
-    struct Compartment* comp = manager_find_compartment_by_ddc(cheri_ddc_get());
-    manager_free_mem_alloc(comp, ptr); // TODO
-    return;
-}
-
-int
-my_fprintf(FILE* stream, const char* format, ...)
-{
-    va_list va_args;
-    va_start(va_args, format);
-    int res = vfprintf(stream, format, va_args);
-    va_end(va_args);
-    return res;
-}
-
-size_t
-my_call_comp(size_t comp_id, char* fn_name, void* args, size_t args_count)
-{
-    struct Compartment* to_call = manager_get_compartment_by_id(comp_id);
-    return comp_exec(to_call, fn_name, args, args_count);
 }
 
 /*******************************************************************************
@@ -159,68 +49,173 @@ void print_full_cap(uintcap_t cap) {
     printf("\n");
 }
 
-/* Setup required capabilities on the heap to jump from within compartments via
- * a context switch
- *
- * For each function to be intercepted, we define the following:
- * redirect_func function to be executed at a higher privilege level
- * TODO I think the below three are common and can be lifted
- * intercept_ddc ddc to be installed for the transition
- * intercept_pcc
- *      higher privileged pcc pointing to the transition support function
- * sealed_redirect_cap
- *      sealed capability pointing to the consecutive intercept capabilities;
- *      this is the only component visible to the compartments
- */
-void
-setup_intercepts()
+void*
+get_next_comp_addr(void)
 {
-    for (size_t i = 0; i < sizeof(to_intercept_funcs) / sizeof(to_intercept_funcs[0]); ++i)
+    if (min_next_comp_addr == NULL)
     {
-        comp_intercept_funcs[i].func_name = to_intercept_funcs[i].func_name;
-        comp_intercept_funcs[i].redirect_func = to_intercept_funcs[i].redirect_func;
-        comp_intercept_funcs[i].intercept_ddc = manager_ddc;
-        comp_intercept_funcs[i].intercept_pcc =
-            cheri_address_set(cheri_pcc_get(), (uintptr_t) intercept_wrapper);
-        void* __capability sealed_redirect_cap =
-            cheri_address_set(manager_ddc, (uintptr_t) &comp_intercept_funcs[i].intercept_ddc);
-        asm("SEAL %[cap], %[cap], lpb\n\t"
-                : [cap]"+C"(sealed_redirect_cap)
-                : /**/ );
-        comp_intercept_funcs[i].redirect_cap = sealed_redirect_cap;
+        min_next_comp_addr = (void*) comp_start_addr;
     }
-    comp_return_caps[0] = manager_ddc; // TODO does this need to be sealed?
-    comp_return_caps[1] = cheri_address_set(cheri_pcc_get(), (uintptr_t) comp_exec_out);
+    return min_next_comp_addr;
 }
 
 struct Compartment*
-manager_find_compartment_by_addr(void* ptr)
+register_new_comp(char* filename, bool allow_default_entry)
 {
-    return loaded_comp; // TODO
+    size_t new_comp_ep_count;
+    struct ConfigEntryPoint* new_cep =
+        parse_compartment_config(filename, &new_comp_ep_count, allow_default_entry);
+
+    char** ep_names = calloc(new_comp_ep_count, sizeof(char*));
+    for (size_t i = 0; i < new_comp_ep_count; ++i)
+    {
+        ep_names[i] = malloc(strlen(new_cep[i].name) + 1);
+        strcpy(ep_names[i], new_cep[i].name);
+    }
+
+    char** intercept_names = calloc(INTERCEPT_FUNC_COUNT, sizeof(char*));
+    void** intercept_addrs = calloc(INTERCEPT_FUNC_COUNT, sizeof(uintptr_t));
+    for (size_t i = 0; i < INTERCEPT_FUNC_COUNT; ++i)
+    {
+        intercept_names[i] = malloc(strlen(comp_intercept_funcs[i].func_name));
+        strcpy(intercept_names[i], comp_intercept_funcs[i].func_name);
+        intercept_addrs[i] = comp_intercept_funcs[i].redirect_func;
+    }
+
+    struct Compartment* new_comp =
+        comp_from_elf(filename, ep_names, new_comp_ep_count, intercept_names,
+                      intercept_addrs, INTERCEPT_FUNC_COUNT, get_next_comp_addr());
+    new_comp->id = comps_count;
+    void* __capability new_comp_ddc = cheri_address_set(cheri_ddc_get(), (uintptr_t) new_comp->base);
+    // TODO double check second parameter of `cheri_bounds_set`
+    new_comp_ddc = cheri_bounds_set(new_comp_ddc, (uintptr_t) new_comp->scratch_mem_stack_top);
+    new_comp->ddc = new_comp_ddc;
+
+    struct CompWithEntries* new_cwe = malloc(sizeof(struct CompWithEntries));
+    comps = realloc(comps, comps_count * sizeof(struct CompWithEntries*));
+    comps[comps_count] = malloc(sizeof(struct CompWithEntries));
+    comps[comps_count]->comp = new_comp;
+    comps[comps_count]->cep = new_cep;
+    comps_count += 1;
+
+    min_next_comp_addr =
+        align_up((char*) comp_start_addr + new_comp->size +
+                 comp_page_interval_count * sysconf(_SC_PAGESIZE),
+                 sysconf(_SC_PAGESIZE));
+
+    for (size_t i = 0; i < new_comp_ep_count; ++i)
+    {
+        free(ep_names[i]);
+    }
+    free(ep_names);
+    for (size_t i = 0; i < INTERCEPT_FUNC_COUNT; ++i)
+    {
+        free(intercept_names[i]);
+    }
+    free(intercept_names);
+    free(intercept_addrs);
+
+    return new_comp;
+}
+
+int64_t
+exec_comp(struct Compartment* to_exec, char* entry_fn, char** entry_fn_args)
+{
+    struct CompWithEntries* comp_to_run = get_comp_with_entries(to_exec);
+    struct ConfigEntryPoint comp_entry = get_entry_point(entry_fn, comp_to_run->cep, to_exec->entry_point_count);
+    void* comp_args = prepare_compartment_args(entry_fn_args, comp_entry);
+
+    struct Compartment* old_comp = loaded_comp;
+    loaded_comp = to_exec;
+    int64_t exec_res = comp_exec(to_exec, entry_fn, comp_args, comp_entry.arg_count);
+    loaded_comp = old_comp;
+
+    return exec_res;
+}
+
+void
+clean_all_comps()
+{
+    for (size_t i = 0; i < comps_count; ++i)
+    {
+        clean_comp(comps[i]->comp);
+    }
+    free(comps);
+}
+
+void
+clean_comp(struct Compartment* to_clean)
+{
+    comp_clean(to_clean);
+    struct CompWithEntries* cwe = get_comp_with_entries(to_clean);
+    free(cwe->comp);
+    free(cwe->cep);
+    free(cwe);
+    // TODO move around memory from `comps`
+}
+
+static
+struct CompWithEntries*
+get_comp_with_entries(struct Compartment* to_find)
+{
+    for (size_t i = 0; i < comps_count; ++i)
+    {
+        if (comps[i]->comp->id == to_find->id)
+        {
+            return comps[i];
+        }
+    }
+    errx(1, "Couldn't find requested compartment with id %zu.", to_find->id);
+}
+
+struct Compartment*
+manager_find_compartment_by_addr(void* addr)
+{
+    size_t i;
+    for (i = 0; i < comps_count; ++i)
+    {
+        if (comps[i]->comp->base <= addr &&
+            (void*) ((char*) comps[i]->comp->base + comps[i]->comp->size) > addr)
+        {
+            break;
+        }
+    }
+    assert(i != comps_count);
+    return comps[i]->comp;
 }
 
 struct Compartment*
 manager_find_compartment_by_ddc(void* __capability ddc)
 {
-    return loaded_comp; // TODO
+    size_t i;
+    for (i = 0; i < comps_count; ++i)
+    {
+        if (comps[i]->comp->ddc == ddc)
+        {
+            return comps[i]->comp;
+        }
+    }
+    // TODO improve error message with ddc
+    errx(1, "Could not find compartment.");
 }
 
 struct Compartment*
 manager_get_compartment_by_id(size_t id)
 {
-    return comps[id];
+    assert(id < comps_count);
+    return comps[id]->comp;
 }
 
 void
 toml_parse_error(char* error_msg, char* errbuf)
 {
-    printf("%s: %s\n", error_msg, errbuf);
-    exit(1);
+    errx(1, "%s: %s\n", error_msg, errbuf);
 }
 
 char*
 prep_config_filename(char* filename)
 {
+    // TODO do these string manipulation things leak?
     const char* prefix = "./";
     if (!strncmp(filename, prefix, strlen(prefix)))
     {
@@ -229,12 +224,19 @@ prep_config_filename(char* filename)
     const char* suffix_to_add = ".comp";
     char* config_filename = malloc(strlen(filename) + strlen(suffix_to_add) + 1);
     strcpy(config_filename, filename);
+    const char* suffix = ".so";
+    char* suffix_start = strrchr(config_filename, '.');
+    if (suffix_start && !strcmp(suffix_start, suffix))
+    {
+        *suffix_start = '\0';
+    }
     strcat(config_filename, suffix_to_add);
     return config_filename;
 }
 
+static
 struct ConfigEntryPoint*
-parse_compartment_config(char* comp_filename, size_t* entry_point_count)
+parse_compartment_config(char* comp_filename, size_t* entry_point_count, bool allow_default)
 {
     // Get config file name
     char* config_filename = prep_config_filename(comp_filename);
@@ -242,7 +244,10 @@ parse_compartment_config(char* comp_filename, size_t* entry_point_count)
     free(config_filename);
     if (!config_fd)
     {
-        return NULL;
+        assert(allow_default);
+        errno = 0;
+        *entry_point_count = 1;
+        return make_default_entry_point();
     }
 
     // Parse config file
@@ -283,6 +288,7 @@ clean_compartment_config(struct ConfigEntryPoint* cep, size_t entry_point_count)
 {
     for (size_t i = 0; i < entry_point_count; ++i)
     {
+        free((void*) cep[i].name);
         for (size_t j = 0; j < cep[i].arg_count; ++j)
         {
             free(cep[i].args_type[j]);
@@ -292,6 +298,7 @@ clean_compartment_config(struct ConfigEntryPoint* cep, size_t entry_point_count)
     free(cep);
 }
 
+static
 struct ConfigEntryPoint
 get_entry_point(char* entry_point_fn, struct ConfigEntryPoint* ceps, size_t cep_count)
 {
@@ -305,10 +312,10 @@ get_entry_point(char* entry_point_fn, struct ConfigEntryPoint* ceps, size_t cep_
         }
         cep_count -= 1;
     }
-    printf("Did not find entry point for function %s!\n", entry_point_fn);
-    assert(false);
+    errx(1, "Did not find entry point for function %s!\n", entry_point_fn);
 }
 
+static
 void*
 prepare_compartment_args(char** args, struct ConfigEntryPoint cep)
 {
@@ -345,17 +352,18 @@ prepare_compartment_args(char** args, struct ConfigEntryPoint cep)
         }
         else
         {
-            printf("Unhandled compartment argument type %s!\n", cep.args_type[i]);
-            assert(false);
+            errx(1, "Unhandled compartment argument type %s!\n", cep.args_type[i]);
         }
-        memcpy(parsed_args + i * COMP_ARG_SIZE, &tmp, to_copy);
+        memcpy((char*) parsed_args + i * COMP_ARG_SIZE, &tmp, to_copy);
     }
     return parsed_args;
 }
 
+static
 struct ConfigEntryPoint*
-set_default_entry_point(struct ConfigEntryPoint* cep)
+make_default_entry_point()
 {
+    struct ConfigEntryPoint* cep = malloc(sizeof(struct ConfigEntryPoint));
     cep->name = malloc(strlen("main") + 1);
     strcpy((char*) cep->name, "main");
     cep->arg_count = 0;

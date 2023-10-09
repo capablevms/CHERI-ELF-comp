@@ -24,18 +24,15 @@ ELF binary. Each compartment will be restricted to its own memory chunk, and
 should not be able to access (i.e., load or store) any memory outside the chunk
 determined by the manager.
 
-Compartments are loaded from a file on disk, in the form of a pre-compiled
-static ELF binary. We prefer static binaries, as this ensures (most) of the
-compartment functionality is self contained (further discussion on exceptions
-[in this Section](#function-interception)). Compartments are then allocated a
-chunk of the manager process' memory, and the executable code of the
-compartment is loaded inside that chunk. Additional memory is reserved within
-the chunk for the compartment's stack and heap. A capability is defined around
-the allocated chunk. Whenever we transition to a given compartment, we load its
-respective capability inside the DDC, essentially limiting memory loads and
-stores within the compartment's allocated memory region. Once the compartment
-is loaded into memory, we are able to call functions defined in the binary from
-the manager.
+Compartments are loaded from a file on disk, in the form of a pre-compiled ELF
+binary. Compartments are then allocated a chunk of the manager process' memory,
+and the executable code of the compartment is loaded inside that chunk.
+Additional memory is reserved within the chunk for the compartment's stack and
+heap. A capability is defined around the allocated chunk. Whenever we
+transition to a given compartment, we load its respective capability inside the
+DDC, essentially limiting memory loads and stores within the compartment's
+allocated memory region. Once the compartment is loaded into memory, we are
+able to call functions defined in the binary from the manager.
 
 There is one exception when a compartment may access memory outside its
 designated region: if it is passed a capability by another compartment, then
@@ -44,6 +41,26 @@ originally would be exclusively owned by the other compartment. This would be
 useful for sharing more complex data across compartments, but doing so
 essentially removes the security over the shared region for the original owner
 compartment, so must be done so sparsely.
+
+## Structure overview
+
+The project is split into the following components (subject to change):
+* `manager` - this exposes the main API that users are expected to use. It
+  offers functions to initialize a compartment from a given ELF binary, execute
+  a compartment, and general compartment management features. It currently does
+  not support deleting compartments.
+* `compartment` - this is mainly to do with compartment internals, and reading
+  ELF data for the given input file, managing memory, and various other
+  interesting bits we do to ensure code can function when
+  DDC-compartmentalized.
+* `intercept` - a feature to automatically intercept functions within
+  compartments that need to be executed within a higher-trust level. To our
+  knowledge, these are functions that might call into vDSO[^1][^2], or perform
+  system calls. Other situations might be added here as we explore more.
+* `mem_mng` - we implement a simple bump allocator to ensure that internal
+  compartment memory allocations are done within the compartment, in the area
+  specifically marked to be used as heap. This is the implementation of the
+  allocator
 
 ### Executing a compartment
 
@@ -71,6 +88,8 @@ function, then transitioning back into the compartment.
 Current limitations (as this is a work in progress, some of these are planned
 to be addressed):
 * single compartment;
-* the user-code must be compiled with `--static` and `--image-base` set to some
-  pre-determined variable;
 * only 3 arguments supported for argument passing, not floats or pointers.
+* did not check for support for capabilities within compartments
+
+[^1]: https://en.wikipedia.org/wiki/VDSO
+[^2]: https://lwn.net/Articles/446528/
