@@ -58,13 +58,20 @@ comp_from_elf(char* filename, struct ConfigEntryPoint* entry_points, size_t entr
     struct Compartment* new_comp = comp_init();
     int pread_res;
 
+    new_comp->fd = open(filename, O_RDONLY);
+    if (new_comp->fd == -1)
+    {
+        printf("Error opening compartment file  %s!\n", filename);
+        free(new_comp);
+        exit(1);
+    }
+
     assert(entry_points);
     assert(entry_point_count > 0);
     new_comp->comp_fns = malloc(entry_point_count * sizeof(struct entry_point));
 
     // Read elf headers
     Elf64_Ehdr comp_ehdr;
-    new_comp->fd = open(filename, O_RDONLY);
     assert(new_comp->fd != -1);
     pread_res = pread(new_comp->fd, &comp_ehdr, sizeof(comp_ehdr), 0);
     assert(pread_res != -1);

@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
 project(CHERI_ELF_Compartments LANGUAGES C ASM)
 
+# Set global compilation options
+set(CMAKE_COMPILE_WARNING_AS_ERROR ON)
+
+# Set useful directory variables
 set(TEST_DIR ${CMAKE_SOURCE_DIR}/tests)
 set(SRC_DIR ${CMAKE_SOURCE_DIR}/src)
 set(INCLUDE_DIR ${CMAKE_SOURCE_DIR}/include)

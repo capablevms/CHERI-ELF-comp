@@ -28,7 +28,7 @@ define_property(TARGET
                 FULL_DOCS "Additional file dependencies to run a test.")
 
 # Helper functions
-function(get_deps target deps_var)
+function(get_deps target)
     set(deps_var "")
     list(APPEND deps_var $<TARGET_FILE:${target}>)
     get_property(has_config TARGET ${target} PROPERTY compartment_config SET)
@@ -67,52 +67,36 @@ function(new_target test_name compartment)
     endif()
 endfunction()
 
-function(new_test test_name)
-    if(${ARGC} EQUAL "1")
-        get_property(is_comp TARGET ${test_name} PROPERTY compartment SET)
-        get_deps(${test_name} deps_var)
-        if(is_comp)
-            add_test(NAME ${test_name}
-                     COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.py
-                             manager_call
-                             --test-args $<TARGET_FILE_NAME:${test_name}>
-                             --dependencies ${deps_var}
-                     COMMAND_EXPAND_LISTS)
-        else()
-            add_test(NAME ${test_name}
-                     COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.py
-                             $<TARGET_FILE_NAME:${test_name}>
-                             --dependencies ${deps_var}
-                     COMMAND_EXPAND_LISTS)
-        endif()
-    elseif(${ARGC} GREATER_EQUAL "3")
-        set(test_bin ${ARGV1})
-        list(JOIN ARGV2 " " test_args)
-        get_property(is_comp TARGET ${test_bin} PROPERTY compartment SET)
-        get_deps(${test_bin} deps_var)
-        if(is_comp)
-            add_test(NAME ${test_name}
-                COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.py
-                        manager_args
-                        --test-args $<TARGET_FILE_NAME:${test_bin}> ${test_args}
-                        --dependencies ${deps_var}
-                COMMAND_EXPAND_LISTS)
-        else()
-            message(FATAL_ERROR "Shouldn't get here")
-        endif()
+function(new_test test_name test_runner test_bin)
+    if(test_bin)
+        get_deps(${test_bin})
     else()
-        message(FATAL_ERROR "Missing arguments to test.")
+        get_deps(${test_runner})
     endif()
+    list(PREPEND test_cmd ${deps_var})
+    if(test_cmd)
+        list(PREPEND test_cmd "--dependencies")
+    endif()
+    if(test_bin)
+        list(PREPEND test_cmd ${ARGN})
+        list(PREPEND test_cmd ${test_bin})
+        list(PREPEND test_cmd "--test-args")
+    endif()
+    list(PREPEND test_cmd $<TARGET_FILE_NAME:${test_runner}>)
+    add_test(NAME ${test_name}
+             COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.py ${test_cmd}
+             COMMAND_EXPAND_LISTS)
 endfunction()
 
 function(new_dependency target dep_file)
     set_property(TARGET ${target} APPEND PROPERTY extra_deps ${dep_file})
 endfunction()
 
-# Library tests
+# Binaries to build
 set(func_binaries
     "test_map"
     "test_args_near_unmapped"
+    "test_ddc_overwrite_manager"
     "test_two_comps"
     "test_two_comps_inter_call"
     )
@@ -123,30 +107,37 @@ set(comp_binaries
     "lua_simple"
     "lua_script"
     "args_simple"
+    "test_ddc_overwrite"
     "test_two_comps-comp1"
     "test_two_comps-comp2 0x2000000"
     )
 
-set(tests
-    "simple"
-    "time"
-    "lua_simple"
-    "lua_script"
+# Tests with no arguments
+set(tests_direct
     "test_map"
     "test_args_near_unmapped"
     "test_two_comps"
     "test_two_comps_inter_call"
-    "args-simple args_simple check_simple 40 2"
-    "args-more args_simple check_simple 40 2 2 2" # Check additional arguments are ignored
-    "args-combined args_simple check_combined 400 2 20"
-    "args-negative args_simple check_negative -42"
-    "args-long-max args_simple check_llong_max 9223372036854775807"
-    "args-long-min args_simple check_llong_min -9223372036854775808"
-    "args-ulong-max args_simple check_ullong_max 18446744073709551615"
+    "test_ddc_overwrite_manager"
     )
 
+# Tests with arguments
+# FORMAT : <test_name> <binary> <binary_args> [...]
+set(tests_args
+    "simple manager_call simple"
+    "time manager_call time"
+    "lua_simple manager_call lua_simple"
+    "lua_script manager_call lua_script"
+    "args-simple manager_args args_simple check_simple 40 2"
+    "args-more manager_args args_simple check_simple 40 2 2 2" # Check additional arguments are ignored
+    "args-combined manager_args args_simple check_combined 400 2 20"
+    "args-negative manager_args args_simple check_negative -42"
+    "args-long-max manager_args args_simple check_llong_max 9223372036854775807"
+    "args-long-min manager_args args_simple check_llong_min -9223372036854775808"
+    "args-ulong-max manager_args args_simple check_ullong_max 18446744073709551615"
+    )
 
-# Build targets
+#  Build targets
 foreach(comp_t IN LISTS comp_binaries)
     string(FIND ${comp_t} " " space_pos)
     if(${space_pos} EQUAL -1)
@@ -163,8 +154,9 @@ foreach(func_t IN LISTS func_binaries)
     new_target(${func_t} FALSE)
 endforeach()
 
+
 # Additional dependencies
-new_dependency(lua_script ${CMAKE_CURRENT_SOURCE_DIR}/hello_world.lua)
+new_dependency(test_map $<TARGET_FILE:simple>)
 new_dependency(test_args_near_unmapped $<TARGET_FILE:args_simple>)
 new_dependency(test_args_near_unmapped ${CMAKE_CURRENT_SOURCE_DIR}/args_simple.comp)
 
@@ -176,16 +168,24 @@ new_dependency(test_two_comps_inter_call $<TARGET_FILE:test_two_comps-comp1>)
 new_dependency(test_two_comps_inter_call $<TARGET_FILE:test_two_comps-comp2>)
 new_dependency(test_two_comps_inter_call ${CMAKE_CURRENT_SOURCE_DIR}/test_two_comps-comp1.comp)
 
+new_dependency(test_ddc_overwrite_manager $<TARGET_FILE:test_ddc_overwrite>)
+new_dependency(test_ddc_overwrite_manager ${CMAKE_CURRENT_SOURCE_DIR}/test_ddc_overwrite.comp)
+
+new_dependency(lua_script ${CMAKE_CURRENT_SOURCE_DIR}/hello_world.lua)
+
+foreach(test_d IN LISTS tests_direct)
+    new_test(${test_d} ${test_d} "" "")
+endforeach()
+
 # Prepare tests
-foreach(test_t IN LISTS tests)
-    string(REPLACE " " ";" test_t_list ${test_t})
-    list(LENGTH test_t_list test_t_len)
-    if(${test_t_len} EQUAL "1")
-        new_test(${test_t})
-    else()
-        list(GET test_t_list 0 test_name)
-        list(GET test_t_list 1 test_bin)
-        list(SUBLIST test_t_list 2 -1 test_args)
-        new_test(${test_name} ${test_bin} "${test_args}")
+foreach(test_a IN LISTS tests_args)
+    string(REPLACE " " ";" test_args_list ${test_a})
+    list(GET test_args_list 0 test_name)
+    list(GET test_args_list 1 test_runner)
+    list(GET test_args_list 2 test_bin)
+    list(LENGTH test_args_list test_args_len)
+    if(${test_args_len} GREATER 3)
+        list(SUBLIST test_args_list 3 -1 test_bin_args)
     endif()
+    new_test(${test_name} ${test_runner} ${test_bin} ${test_bin_args})
 endforeach()
