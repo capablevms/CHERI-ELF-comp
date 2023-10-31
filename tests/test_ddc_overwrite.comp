@@ -1,0 +1,2 @@
+[test_leak]
+args_type = ["unsigned long long"]
