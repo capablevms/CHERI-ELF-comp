@@ -38,13 +38,13 @@ comp_init()
  * Main compartment functions
  ******************************************************************************/
 
-/* Comparison function for `struct entry_point`
+/* Comparison function for `struct CompEntryPoint`
  */
 int
 entry_point_cmp(const void *val1, const void *val2)
 {
-    struct entry_point *ep1 = *(struct entry_point **) val1;
-    struct entry_point *ep2 = *(struct entry_point **) val2;
+    struct CompEntryPoint *ep1 = *(struct CompEntryPoint **) val1;
+    struct CompEntryPoint *ep2 = *(struct CompEntryPoint **) val2;
     return strcmp(ep1->fn_name, ep2->fn_name);
 }
 
@@ -67,7 +67,8 @@ comp_from_elf(char *filename, char **entry_points, size_t entry_point_count,
 
     assert(entry_points);
     assert(entry_point_count > 0);
-    new_comp->comp_fns = malloc(entry_point_count * sizeof(struct entry_point));
+    new_comp->comp_eps
+        = malloc(entry_point_count * sizeof(struct CompEntryPoint));
 
     // Read elf headers
     Elf64_Ehdr comp_ehdr;
@@ -331,8 +332,8 @@ comp_from_elf(char *filename, char **entry_points, size_t entry_point_count,
             comp_symtb, comp_strtb, comp_symtb_shdr.sh_size);
     for (size_t i = 0; i < entry_point_count; ++i)
     {
-        struct entry_point *new_entry_point
-            = malloc(sizeof(struct entry_point));
+        struct CompEntryPoint *new_entry_point
+            = malloc(sizeof(struct CompEntryPoint));
         new_entry_point->fn_name = entry_points[i];
         switch (new_comp->elf_type)
         {
@@ -350,7 +351,7 @@ comp_from_elf(char *filename, char **entry_points, size_t entry_point_count,
             default:
                 errx(1, "Invalid ELF type");
         }
-        new_comp->comp_fns[new_comp->entry_point_count] = new_entry_point;
+        new_comp->comp_eps[new_comp->entry_point_count] = new_entry_point;
         new_comp->entry_point_count += 1;
     }
     free(ep_syms);
@@ -517,7 +518,7 @@ comp_add_intercept(struct Compartment *new_comp, uintptr_t intercept_target,
     new_instrs[new_instr_idx++] = arm_b_instr;
 
     assert(new_instr_idx == INTERCEPT_INSTR_COUNT);
-    struct intercept_patch new_patch;
+    struct InterceptPatch new_patch;
     new_patch.patch_addr = (void *) intercept_target;
     memcpy(new_patch.instr, new_instrs, sizeof(new_instrs));
     __clear_cache(new_patch.instr, new_patch.instr + sizeof(new_instrs));
@@ -525,7 +526,7 @@ comp_add_intercept(struct Compartment *new_comp, uintptr_t intercept_target,
     new_patch.manager_cap = sealed_redirect_cap;
     new_comp->curr_intercept_count += 1;
     new_comp->intercept_patches = realloc(new_comp->intercept_patches,
-        new_comp->curr_intercept_count * sizeof(struct intercept_patch));
+        new_comp->curr_intercept_count * sizeof(struct InterceptPatch));
     new_comp->intercept_patches[new_comp->curr_intercept_count - 1] = new_patch;
 }
 
@@ -614,7 +615,7 @@ comp_map(struct Compartment *to_map)
     // Inject intercept instructions within identified intercepted functions
     for (size_t i = 0; i < to_map->curr_intercept_count; ++i)
     {
-        struct intercept_patch to_patch = to_map->intercept_patches[i];
+        struct InterceptPatch to_patch = to_map->intercept_patches[i];
         // TODO change to memcpy?
         for (size_t j = 0; j < INTERCEPT_INSTR_COUNT; ++j)
         {
@@ -671,9 +672,9 @@ comp_exec(
     void *fn = NULL;
     for (size_t i = 0; i < to_exec->entry_point_count; ++i)
     {
-        if (!strcmp(fn_name, to_exec->comp_fns[i]->fn_name))
+        if (!strcmp(fn_name, to_exec->comp_eps[i]->fn_name))
         {
-            fn = (void *) to_exec->comp_fns[i]->fn_addr;
+            fn = (void *) to_exec->comp_eps[i]->fn_addr;
             break;
         }
     }
@@ -726,8 +727,8 @@ comp_clean(struct Compartment *to_clean)
 
     for (size_t i = 0; i < to_clean->entry_point_count; ++i)
     {
-        free((char *) to_clean->comp_fns[i]->fn_name);
-        free(to_clean->comp_fns[i]);
+        free((char *) to_clean->comp_eps[i]->fn_name);
+        free(to_clean->comp_eps[i]);
     }
 
     for (size_t i = 0; i < to_clean->rela_maps_count; ++i)

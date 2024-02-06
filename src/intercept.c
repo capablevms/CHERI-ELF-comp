@@ -1,6 +1,6 @@
 #include "intercept.h"
 
-struct func_intercept comp_intercept_funcs[INTERCEPT_FUNC_COUNT];
+struct FuncIntercept comp_intercept_funcs[INTERCEPT_FUNC_COUNT];
 void *__capability comp_return_caps[COMP_RETURN_CAPS_COUNT];
 void *__capability sealed_redirect_cap;
 
@@ -131,7 +131,7 @@ my_realloc(void *ptr, size_t to_alloc)
     }
 
     void *new_ptr = manager_register_mem_alloc(comp, to_alloc);
-    struct mem_alloc *old_alloc
+    struct MemAlloc *old_alloc
         = get_alloc_struct_from_ptr(comp, (uintptr_t) ptr);
     memcpy(
         new_ptr, ptr, to_alloc < old_alloc->size ? to_alloc : old_alloc->size);

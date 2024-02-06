@@ -35,7 +35,7 @@ extern void *__capability sealed_redirect_cap;
 
 /* Data required to perform the transition for an intercepted function
  */
-struct func_intercept
+struct FuncIntercept
 {
     char *func_name;
     void *redirect_func;
@@ -82,7 +82,7 @@ my_fprintf(FILE *, const char *, ...);
 
 size_t
 my_call_comp(size_t, char *, void *, size_t);
-static const struct func_intercept to_intercept_funcs[] = {
+static const struct FuncIntercept to_intercept_funcs[] = {
     /* vDSO funcs */
     { "time", (void *) intercepted_time },
     /* Mem funcs */
@@ -94,6 +94,6 @@ static const struct func_intercept to_intercept_funcs[] = {
 // Functions to be intercepted and associated data
 #define INTERCEPT_FUNC_COUNT                                                   \
     sizeof(to_intercept_funcs) / sizeof(to_intercept_funcs[0])
-extern struct func_intercept comp_intercept_funcs[INTERCEPT_FUNC_COUNT];
+extern struct FuncIntercept comp_intercept_funcs[INTERCEPT_FUNC_COUNT];
 
 #endif // _INTERCEPT_H

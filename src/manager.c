@@ -11,38 +11,21 @@ const uintptr_t comp_start_addr = 0x1000000UL;
 const unsigned short comp_page_interval_count = 2;
 void *min_next_comp_addr = NULL;
 
-const char *comp_env_fields[] = {
-    "PATH",
-};
 void *__capability manager_ddc = 0;
 
 const char *comp_config_suffix = ".comp";
 
-static struct ConfigEntryPoint *
+static struct CompEntryPointDef *
 parse_compartment_config(char *, size_t *, bool);
-static struct ConfigEntryPoint *
+static struct CompEntryPointDef *
 make_default_entry_point();
-static struct ConfigEntryPoint
-get_entry_point(char *, struct ConfigEntryPoint *, size_t);
+static struct CompEntryPointDef
+get_entry_point(char *, struct CompEntryPointDef *, size_t);
 static void *
-prepare_compartment_args(char **args, struct ConfigEntryPoint);
+prepare_compartment_args(char **args, struct CompEntryPointDef);
 
 static struct CompWithEntries *
 get_comp_with_entries(struct Compartment *);
-
-const char *
-get_env_str(const char *env_name)
-{
-    size_t env_name_len = strlen(env_name);
-    for (char **env = environ; env != NULL; ++env)
-    {
-        const char *str = *env;
-        if (strncmp(str, env_name, env_name_len) == 0
-            && str[env_name_len] == '=')
-            return str;
-    }
-    return NULL;
-}
 
 /*******************************************************************************
  * Utility functions
@@ -76,7 +59,7 @@ struct Compartment *
 register_new_comp(char *filename, bool allow_default_entry)
 {
     size_t new_comp_ep_count;
-    struct ConfigEntryPoint *new_cep = parse_compartment_config(
+    struct CompEntryPointDef *new_cep = parse_compartment_config(
         filename, &new_comp_ep_count, allow_default_entry);
 
     char **ep_names = calloc(new_comp_ep_count, sizeof(char *));
@@ -136,7 +119,7 @@ int64_t
 exec_comp(struct Compartment *to_exec, char *entry_fn, char **entry_fn_args)
 {
     struct CompWithEntries *comp_to_run = get_comp_with_entries(to_exec);
-    struct ConfigEntryPoint comp_entry = get_entry_point(
+    struct CompEntryPointDef comp_entry = get_entry_point(
         entry_fn, comp_to_run->cep, to_exec->entry_point_count);
     void *comp_args = prepare_compartment_args(entry_fn_args, comp_entry);
 
@@ -251,7 +234,7 @@ prep_config_filename(char *filename)
     return config_filename;
 }
 
-static struct ConfigEntryPoint *
+static struct CompEntryPointDef *
 parse_compartment_config(
     char *comp_filename, size_t *entry_point_count, bool allow_default)
 {
@@ -276,8 +259,8 @@ parse_compartment_config(
         toml_parse_error("TOML table parse error", toml_errbuf);
     }
     *entry_point_count = toml_table_ntab(tab);
-    struct ConfigEntryPoint *entry_points
-        = malloc(*entry_point_count * sizeof(struct ConfigEntryPoint));
+    struct CompEntryPointDef *entry_points
+        = malloc(*entry_point_count * sizeof(struct CompEntryPointDef));
     for (size_t i = 0; i < *entry_point_count; ++i)
     {
         const char *fname = toml_key_in(tab, i);
@@ -304,7 +287,8 @@ parse_compartment_config(
 }
 
 void
-clean_compartment_config(struct ConfigEntryPoint *cep, size_t entry_point_count)
+clean_compartment_config(
+    struct CompEntryPointDef *cep, size_t entry_point_count)
 {
     for (size_t i = 0; i < entry_point_count; ++i)
     {
@@ -318,11 +302,11 @@ clean_compartment_config(struct ConfigEntryPoint *cep, size_t entry_point_count)
     free(cep);
 }
 
-static struct ConfigEntryPoint
+static struct CompEntryPointDef
 get_entry_point(
-    char *entry_point_fn, struct ConfigEntryPoint *ceps, size_t cep_count)
+    char *entry_point_fn, struct CompEntryPointDef *ceps, size_t cep_count)
 {
-    struct ConfigEntryPoint curr_ep;
+    struct CompEntryPointDef curr_ep;
     while (cep_count != 0)
     {
         curr_ep = ceps[cep_count - 1];
@@ -336,7 +320,7 @@ get_entry_point(
 }
 
 static void *
-prepare_compartment_args(char **args, struct ConfigEntryPoint cep)
+prepare_compartment_args(char **args, struct CompEntryPointDef cep)
 {
     void *parsed_args = calloc(COMP_ARG_SIZE, cep.arg_count);
     size_t allocated_args = 0;
@@ -379,10 +363,10 @@ prepare_compartment_args(char **args, struct ConfigEntryPoint cep)
     return parsed_args;
 }
 
-static struct ConfigEntryPoint *
+static struct CompEntryPointDef *
 make_default_entry_point()
 {
-    struct ConfigEntryPoint *cep = malloc(sizeof(struct ConfigEntryPoint));
+    struct CompEntryPointDef *cep = malloc(sizeof(struct CompEntryPointDef));
     cep->name = malloc(strlen("main") + 1);
     strcpy((char *) cep->name, "main");
     cep->arg_count = 0;
