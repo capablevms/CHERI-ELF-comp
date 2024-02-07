@@ -7,6 +7,11 @@ src_dir="$(pwd)"
 cheri_dir="$HOME/cheri/output"
 venv_dir="./buildbot-venv"
 
+# Check `clang-format` has been applied
+CLANG_FORMAT_BIN="$cheri_dir/morello-sdk/bin/clang-format"
+CLANG_FORMAT_SOURCES=("$src_dir/src/*.c" "$src_dir/include/*.h" "$src_dir/tests/*.c")
+${CLANG_FORMAT_BIN} --dry-run -Werror ${CLANG_FORMAT_SOURCES[*]}
+
 # Update submodules
 git submodule update --init
 

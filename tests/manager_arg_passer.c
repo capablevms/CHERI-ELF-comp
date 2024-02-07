@@ -11,20 +11,23 @@
  */
 
 int
-main(int argc, char** argv)
+main(int argc, char **argv)
 {
     // Initial setup
     manager_ddc = cheri_ddc_get();
     setup_intercepts();
 
-    assert(argc >= 4 && "Expect at least three arguments: binary file for compartment, entry function for compartment, and at least one argument to pass to compartment function.");
-    char* file = argv[1];
+    assert(argc >= 4
+        && "Expect at least three arguments: binary file for compartment, "
+           "entry function for compartment, and at least one argument to pass "
+           "to compartment function.");
+    char *file = argv[1];
 
-    struct Compartment* arg_comp = register_new_comp(file, false);
+    struct Compartment *arg_comp = register_new_comp(file, false);
     comp_map(arg_comp);
 
-    char* entry_func = argv[2];
-    char** entry_func_args = &argv[3];
+    char *entry_func = argv[2];
+    char **entry_func_args = &argv[3];
     int comp_result = exec_comp(arg_comp, argv[2], &argv[3]);
     comp_clean(arg_comp);
     return comp_result;
