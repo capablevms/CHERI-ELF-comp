@@ -10,8 +10,6 @@
 
 #include "compartment.h"
 
-struct Compartment;
-
 // TODO consider single linked list
 struct mem_alloc
 {

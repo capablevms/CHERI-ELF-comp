@@ -24,9 +24,12 @@ def run_tests(qemu: boot_cheribsd.QemuCheriBSDInstance, args: argparse.Namespace
         boot_cheribsd.set_ld_library_path_with_sysroot(qemu)
     boot_cheribsd.info("Running tests for CHERI-ELF-compartments")
 
+    # Test environment setup
+    subprocess.run(["./tests/init_test.py"], check = True)
+
     # Run command on host to test the executed client
     os.chdir(f"{args.build_dir}/build")
-    subprocess.run(["ctest", "--output-on-failure"], check=True)
+    subprocess.run(["ctest", "--output-on-failure"], check = True)
     return True
 
 if __name__ == '__main__':

@@ -13,7 +13,7 @@ void*
 manager_register_mem_alloc(struct Compartment* comp, size_t mem_size)
 {
     // TODO better algorithm to find blocks of memory available for mapping
-    void* new_mem = (void*) (comp->scratch_mem_base + comp->scratch_mem_alloc);
+    void* new_mem = (char*)comp->scratch_mem_base + comp->scratch_mem_alloc;
     struct mem_alloc* new_alloc = malloc(sizeof(struct mem_alloc));
     new_alloc->ptr = (uintptr_t) new_mem;
     new_alloc->size = mem_size;
@@ -111,6 +111,5 @@ get_alloc_struct_from_ptr(struct Compartment* comp, uintptr_t ptr)
         }
         curr_alloc = curr_alloc->next_alloc;
     }
-    printf("ERROR: Could not find allocated pointer %Pu!\n", ptr);
-    assert(false);
+    errx(1, "ERROR: Could not find allocated pointer %Pu!\n", ptr);
 }

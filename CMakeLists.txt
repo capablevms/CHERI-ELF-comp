@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 project(CHERI_ELF_Compartments LANGUAGES C ASM)
 
 # Set global compilation options
-set(CMAKE_COMPILE_WARNING_AS_ERROR ON)
+add_compile_options(-pedantic -Wno-gnu-binary-literal -Wno-language-extension-token -Werror)
 
 # Set useful directory variables
 set(TEST_DIR ${CMAKE_SOURCE_DIR}/tests)
@@ -12,12 +12,12 @@ set(INCLUDE_DIR ${CMAKE_SOURCE_DIR}/include)
 # Build lua
 set(LUA_DIR ${CMAKE_SOURCE_DIR}/third-party/lua)
 set(LUA_INSTALL_DIR ${LUA_DIR})
-set(LUA_LIB_PATH ${LUA_DIR}/liblua.a)
+set(LUA_LIB_PATH ${LUA_DIR}/liblua.so)
 set(LUA_INCLUDE_DIR ${LUA_DIR})
 
 add_custom_command(
     OUTPUT ${LUA_LIB_PATH}
-    COMMAND make a
+    COMMAND make
     WORKING_DIRECTORY ${LUA_DIR}
 )
 
