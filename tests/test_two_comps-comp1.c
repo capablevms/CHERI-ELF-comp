@@ -1,6 +1,10 @@
 #include <stdio.h>
 
-size_t call_comp(size_t comp_id, char* fn_name, void* args, size_t arg_count) { return 0; };
+size_t
+call_comp(size_t comp_id, char *fn_name, void *args, size_t arg_count)
+{
+    return 0;
+};
 
 int
 inter_call()

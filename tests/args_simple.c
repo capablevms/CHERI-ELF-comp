@@ -1,6 +1,6 @@
 #include <assert.h>
-#include <stdlib.h>
 #include <limits.h>
+#include <stdlib.h>
 
 int
 check_combined(int one, char two, long three)
@@ -46,7 +46,7 @@ check_ullong_max(unsigned long long one)
 }
 
 int
-main(int argc, char** argv)
+main(int argc, char **argv)
 {
     size_t sum = 0;
     for (size_t i = 0; i < argc; ++i)

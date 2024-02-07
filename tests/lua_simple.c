@@ -7,10 +7,10 @@
 int
 main(void)
 {
-    lua_State* L = luaL_newstate();
+    lua_State *L = luaL_newstate();
     luaL_openlibs(L);
 
-    char* test_string = "Hello welt!";
+    char *test_string = "Hello welt!";
     lua_pushstring(L, test_string);
     lua_Integer len = luaL_len(L, 1);
 

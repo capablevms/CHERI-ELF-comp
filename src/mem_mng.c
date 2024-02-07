@@ -9,21 +9,21 @@
  * compartment scratch memory space
  */
 
-void*
-manager_register_mem_alloc(struct Compartment* comp, size_t mem_size)
+void *
+manager_register_mem_alloc(struct Compartment *comp, size_t mem_size)
 {
     // TODO better algorithm to find blocks of memory available for mapping
-    void* new_mem = (char*)comp->scratch_mem_base + comp->scratch_mem_alloc;
-    struct mem_alloc* new_alloc = malloc(sizeof(struct mem_alloc));
+    void *new_mem = (char *) comp->scratch_mem_base + comp->scratch_mem_alloc;
+    struct mem_alloc *new_alloc = malloc(sizeof(struct mem_alloc));
     new_alloc->ptr = (uintptr_t) new_mem;
     new_alloc->size = mem_size;
     manager_insert_new_alloc(comp, new_alloc);
-    comp->scratch_mem_alloc += __builtin_align_up(mem_size, sizeof(void*));
+    comp->scratch_mem_alloc += __builtin_align_up(mem_size, sizeof(void *));
     return new_mem;
 }
 
 void
-manager_insert_new_alloc(struct Compartment* comp, struct mem_alloc* to_insert)
+manager_insert_new_alloc(struct Compartment *comp, struct mem_alloc *to_insert)
 {
     if (comp->alloc_head == NULL)
     {
@@ -42,8 +42,8 @@ manager_insert_new_alloc(struct Compartment* comp, struct mem_alloc* to_insert)
         return;
     }
 
-    struct mem_alloc* curr_alloc = comp->alloc_head;
-    while(curr_alloc->next_alloc != NULL && curr_alloc->ptr < to_insert->ptr)
+    struct mem_alloc *curr_alloc = comp->alloc_head;
+    while (curr_alloc->next_alloc != NULL && curr_alloc->ptr < to_insert->ptr)
     {
         curr_alloc = curr_alloc->next_alloc;
     }
@@ -63,9 +63,9 @@ manager_insert_new_alloc(struct Compartment* comp, struct mem_alloc* to_insert)
 }
 
 size_t
-manager_free_mem_alloc(struct Compartment* comp, void* ptr)
+manager_free_mem_alloc(struct Compartment *comp, void *ptr)
 {
-    struct mem_alloc* curr_alloc = comp->alloc_head;
+    struct mem_alloc *curr_alloc = comp->alloc_head;
     while (curr_alloc != NULL && curr_alloc->ptr != (uintptr_t) ptr)
     {
         curr_alloc = curr_alloc->next_alloc;
@@ -99,11 +99,11 @@ manager_free_mem_alloc(struct Compartment* comp, void* ptr)
  * \param ptr Address to search for
  * \return A record indicating the requested memory allocation
  */
-struct mem_alloc*
-get_alloc_struct_from_ptr(struct Compartment* comp, uintptr_t ptr)
+struct mem_alloc *
+get_alloc_struct_from_ptr(struct Compartment *comp, uintptr_t ptr)
 {
-    struct mem_alloc* curr_alloc = comp->alloc_head;
-    while(curr_alloc->next_alloc != NULL)
+    struct mem_alloc *curr_alloc = comp->alloc_head;
+    while (curr_alloc->next_alloc != NULL)
     {
         if (curr_alloc->ptr == ptr)
         {

@@ -19,16 +19,16 @@ test_leak(unsigned long long secret_addr)
     int secret;
     asm volatile("cvtp c0, %[addr]\n\t"
                  "ldr %w[val], [c0]"
-            : [val] "=r"(secret)
-            : [addr] "r"(secret_addr)
-            : "x0", "memory");
+                 : [val] "=r"(secret)
+                 : [addr] "r"(secret_addr)
+                 : "x0", "memory");
     return secret;
 }
 
 int
 main()
 {
-    int* secret = malloc(sizeof(int));
+    int *secret = malloc(sizeof(int));
     *secret = 42;
     int val = test_leak((unsigned long long) secret);
     assert(val == *secret);

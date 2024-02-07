@@ -1,0 +1,9 @@
+---
+BasedOnStyle: WebKit
+AlwaysBreakAfterReturnType: All
+BreakBeforeBraces: Allman
+ColumnLimit: 80
+IndentCaseLabels: true
+PointerAlignment: Right
+SeparateDefinitionBlocks: Always
+SpaceAfterCStyleCast: true

@@ -18,9 +18,9 @@ return_val(int val)
 }
 
 int
-do_script_arg(char* script_path)
+do_script_arg(char *script_path)
 {
-    lua_State* L = luaL_newstate();
+    lua_State *L = luaL_newstate();
     luaL_openlibs(L);
 
     luaL_dofile(L, script_path);
@@ -32,7 +32,7 @@ do_script_arg(char* script_path)
 int
 do_script()
 {
-    lua_State* L = luaL_newstate();
+    lua_State *L = luaL_newstate();
     luaL_openlibs(L);
 
     luaL_dofile(L, "./hello_world.lua");
@@ -42,7 +42,7 @@ do_script()
 }
 
 int
-main(int argc, char** argv)
+main(int argc, char **argv)
 {
     do_script_arg("./hello_world.lua");
     return 0;
