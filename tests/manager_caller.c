@@ -10,11 +10,6 @@ main(int argc, char **argv)
     assert(argc >= 2
         && "Expect at least one argument: binary file for compartment");
     char *file = argv[1];
-    const char *prefix = "./";
-    if (!strncmp(file, prefix, strlen(prefix)))
-    {
-        file += strlen(prefix);
-    }
 
     struct Compartment *hw_comp = register_new_comp(file, true);
     comp_map(hw_comp);

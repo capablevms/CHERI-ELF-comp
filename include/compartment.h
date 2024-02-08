@@ -62,7 +62,7 @@ extern void *__capability comp_return_caps[2];
  * TODO recheck this is properly used, or re-design into a more light-weight
  * approach with pre-given transition capabilities
  */
-struct intercept_patch
+struct InterceptPatch
 {
     int *patch_addr;
     int32_t instr[INTERCEPT_INSTR_COUNT];
@@ -83,7 +83,7 @@ struct intercept_patch
 
 /* Struct representing a valid entry point to a compartment
  */
-struct entry_point
+struct CompEntryPoint
 {
     const char *fn_name;
     void *fn_addr;
@@ -153,7 +153,7 @@ struct Compartment
     size_t size; // size of compartment in memory
     void *base; // address where to load compartment
     size_t entry_point_count;
-    struct entry_point **comp_fns;
+    struct CompEntryPoint **comp_eps;
     void *mem_top;
     bool mapped;
     bool mapped_full;
@@ -170,7 +170,7 @@ struct Compartment
     void *scratch_mem_stack_top;
     size_t scratch_mem_stack_size;
     void *stack_pointer;
-    struct mem_alloc *alloc_head;
+    struct MemAlloc *alloc_head;
 
     void *manager_caps;
     size_t max_manager_caps_count;
@@ -190,7 +190,7 @@ struct Compartment
 
     // Misc
     short curr_intercept_count;
-    struct intercept_patch *intercept_patches;
+    struct InterceptPatch *intercept_patches;
 };
 
 int

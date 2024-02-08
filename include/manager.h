@@ -41,7 +41,7 @@ extern const char *comp_config_suffix;
  * information that we expect to appear in the compartment, as given by its
  * compartment configuration file
  */
-struct ConfigEntryPoint
+struct CompEntryPointDef
 {
     const char *name;
     size_t arg_count;
@@ -51,7 +51,7 @@ struct ConfigEntryPoint
 struct CompWithEntries
 {
     struct Compartment *comp;
-    struct ConfigEntryPoint *cep;
+    struct CompEntryPointDef *cep;
 };
 
 void *
@@ -60,24 +60,6 @@ struct Compartment *
 register_new_comp(char *, bool);
 int64_t
 exec_comp(struct Compartment *, char *, char **);
-
-struct Compartment *
-manager_find_compartment_by_addr(void *);
-struct Compartment *
-manager_find_compartment_by_ddc(void *__capability);
-struct Compartment *manager_get_compartment_by_id(size_t);
-
-// TODO stack setup when we transition into the compartment; unsure if needed,
-// but keep for now, just in case
-#define ENV_FIELDS_CNT 1
-extern const char *comp_env_fields[ENV_FIELDS_CNT];
-extern char **environ;
-const char *
-get_env_str(const char *);
-int
-manager___vdso_clock_gettime(clockid_t, struct timespec *);
-
-// END TODO
 
 union arg_holder
 {
@@ -95,7 +77,7 @@ clean_all_comps();
 void
 clean_comp(struct Compartment *);
 void
-clean_compartment_config(struct ConfigEntryPoint *, size_t);
+clean_compartment_config(struct CompEntryPointDef *, size_t);
 
 /*******************************************************************************
  * Memory allocation

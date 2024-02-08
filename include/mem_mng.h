@@ -11,13 +11,13 @@
 #include "compartment.h"
 
 // TODO consider single linked list
-struct mem_alloc
+struct MemAlloc
 {
     uintptr_t ptr;
     size_t size;
 
-    struct mem_alloc *prev_alloc;
-    struct mem_alloc *next_alloc;
+    struct MemAlloc *prev_alloc;
+    struct MemAlloc *next_alloc;
 };
 
 extern size_t comp_mem_alloc;
@@ -26,10 +26,10 @@ extern size_t comp_mem_max;
 void *
 manager_register_mem_alloc(struct Compartment *, size_t);
 void
-manager_insert_new_alloc(struct Compartment *, struct mem_alloc *);
+manager_insert_new_alloc(struct Compartment *, struct MemAlloc *);
 size_t
 manager_free_mem_alloc(struct Compartment *, void *);
-struct mem_alloc *
+struct MemAlloc *
 get_alloc_struct_from_ptr(struct Compartment *, uintptr_t);
 
 #endif // MEM_MNG_H
