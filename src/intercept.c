@@ -48,71 +48,6 @@ setup_intercepts()
  * privlige
  ******************************************************************************/
 
-time_t
-intercepted_time(time_t *t)
-{
-    return time(t);
-}
-
-/* As we are performing data compartmentalization, we must store relevant
- * information for accessing an opened file within compartment memory. However,
- * as we are using a bump allocator for internal memory management, we do not
- * have the capability of `free`ing this memory. A future implementation of a
- * better memory allocator will resolve this issue.
- */
-FILE *
-intercepted_fopen(const char *filename, const char *mode)
-{
-    FILE *res = fopen(filename, mode);
-    assert(res != NULL);
-    /*struct Compartment* comp =
-     * manager_find_compartment_by_ddc(cheri_ddc_get()); // TODO*/
-    void *comp_addr = manager_register_mem_alloc(loaded_comp, sizeof(FILE));
-    memcpy(comp_addr, res, sizeof(FILE));
-    return comp_addr;
-}
-
-size_t
-intercepted_fread(
-    void *__restrict buf, size_t size, size_t count, FILE *__restrict fp)
-{
-    return fread(buf, size, count, fp);
-}
-
-size_t
-intercepted_fwrite(
-    void *__restrict buf, size_t size, size_t count, FILE *__restrict fp)
-{
-    return fwrite(buf, size, count, fp);
-}
-
-int
-intercepted_fputc(int chr, FILE *stream)
-{
-    return fputc(chr, stream);
-}
-
-int
-intercepted_fclose(FILE *fp)
-{
-    int res = fclose(fp);
-    assert(res == 0);
-    return res;
-}
-
-int
-intercepted_getc(FILE *stream)
-{
-    return getc(stream);
-}
-
-// Needed by test `lua_script`
-int
-intercepted___srget(FILE *stream)
-{
-    return __srget(stream);
-}
-
 void *
 my_realloc(void *ptr, size_t to_alloc)
 {
@@ -161,16 +96,6 @@ my_free(void *ptr)
      * manager_find_compartment_by_ddc(cheri_ddc_get());*/
     manager_free_mem_alloc(loaded_comp, ptr); // TODO
     return;
-}
-
-int
-my_fprintf(FILE *stream, const char *format, ...)
-{
-    va_list va_args;
-    va_start(va_args, format);
-    int res = vfprintf(stream, format, va_args);
-    va_end(va_args);
-    return res;
 }
 
 size_t

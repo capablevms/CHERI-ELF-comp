@@ -83,8 +83,6 @@ my_fprintf(FILE *, const char *, ...);
 size_t
 my_call_comp(size_t, char *, void *, size_t);
 static const struct FuncIntercept to_intercept_funcs[] = {
-    /* vDSO funcs */
-    { "time", (void *) intercepted_time },
     /* Mem funcs */
     { "malloc", (void *) my_malloc },
     { "realloc", (void *) my_realloc },

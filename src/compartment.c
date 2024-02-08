@@ -75,17 +75,20 @@ comp_from_elf(char *filename, char **entry_points, size_t entry_point_count,
     assert(new_comp->fd != -1);
     do_pread(new_comp->fd, &comp_ehdr, sizeof(Elf64_Ehdr), 0);
     new_comp->elf_type = comp_ehdr.e_type;
-    assert(new_comp->elf_type == ET_DYN || new_comp->elf_type == ET_EXEC);
+    if (new_comp->elf_type != ET_DYN)
+    {
+        errx(1, "Only supporting ELFs of type DYN (shared object files)!");
+    }
 
     struct stat elf_fd_stat;
     fstat(new_comp->fd, &elf_fd_stat);
-    // TODO re-check these
+    // TODO re-check if we're actually using file size anywhere; I think we're
+    // only using loaded-segment size
     new_comp->size = elf_fd_stat.st_size;
 
     // Read program headers
     Elf64_Phdr comp_phdr;
     ptrdiff_t align_size_correction;
-    bool first_load_header = true;
     for (size_t i = 0; i < comp_ehdr.e_phnum; ++i)
     {
         do_pread((int) new_comp->fd, &comp_phdr, sizeof(comp_phdr),
@@ -97,51 +100,18 @@ comp_from_elf(char *filename, char **entry_points, size_t entry_point_count,
             continue;
         }
 
-        if (new_comp->elf_type == ET_DYN)
-        {
-            new_comp->base = new_comp_base;
-        }
-        // Compute loading address of compartment for static binary
-        // TODO empirically, the first `LOAD` program header seems to expect to
-        // be loaded at the lowest address; is this correct?
-        else if (first_load_header)
-        {
-            void *new_comp_base = (void *) comp_phdr.p_vaddr;
-            assert((uintptr_t) new_comp_base % new_comp->page_size == 0);
-            new_comp->base = new_comp_base;
-            first_load_header = false;
-        }
+        new_comp->base = new_comp_base;
 
         // Setup mapping info for the current segment
         struct SegmentMap *this_seg
             = (struct SegmentMap *) malloc(sizeof(struct SegmentMap));
         assert(this_seg != NULL);
-        if (new_comp->elf_type
-            == ET_DYN /*|| new_comp->elf_type == ET_EXEC*/) // TODO distinguish
-                                                            // PIE exec vs
-                                                            // non-PIE exec
-        {
-            void *curr_seg_base = (char *) new_comp->base + comp_phdr.p_vaddr;
-            this_seg->mem_bot = align_down(curr_seg_base, new_comp->page_size);
-            align_size_correction
-                = (char *) curr_seg_base - (char *) this_seg->mem_bot;
-            this_seg->mem_top = (char *) curr_seg_base + comp_phdr.p_memsz;
-        }
-        else if (new_comp->elf_type == ET_EXEC)
-        {
-            // TODO maybe just remove this if if we don't want to support
-            // static binaries anymore
-            assert(false);
-            this_seg->mem_bot
-                = align_down((void *) comp_phdr.p_vaddr, new_comp->page_size);
-            align_size_correction
-                = (char *) comp_phdr.p_vaddr - (char *) this_seg->mem_bot;
-            this_seg->mem_top = (char *) comp_phdr.p_vaddr + comp_phdr.p_memsz;
-        }
-        else
-        {
-            errx(1, "Unhandled ELF type");
-        }
+        void *curr_seg_base = (char *) new_comp->base + comp_phdr.p_vaddr;
+        this_seg->mem_bot = align_down(curr_seg_base, new_comp->page_size);
+        align_size_correction
+            = (char *) curr_seg_base - (char *) this_seg->mem_bot;
+        this_seg->mem_top = (char *) curr_seg_base + comp_phdr.p_memsz;
+
         this_seg->offset = align_down(comp_phdr.p_offset, new_comp->page_size);
         this_seg->mem_sz = comp_phdr.p_memsz + align_size_correction;
         this_seg->file_sz = comp_phdr.p_filesz + align_size_correction;
@@ -206,86 +176,80 @@ comp_from_elf(char *filename, char **entry_points, size_t entry_point_count,
     }
     assert(headers_of_interest_count == found_headers);
 
-    if (new_comp->elf_type == ET_DYN)
+    // Traverse `.rela.plt`, so we can see which function addresses we need
+    // to eagerly load
+    Elf64_Rela *comp_rela_plt = malloc(comp_rela_plt_shdr.sh_size);
+    do_pread((int) new_comp->fd, comp_rela_plt, comp_rela_plt_shdr.sh_size,
+        comp_rela_plt_shdr.sh_offset);
+    size_t rela_count = comp_rela_plt_shdr.sh_size / sizeof(Elf64_Rela);
+
+    Elf64_Shdr dyn_sym_hdr;
+    do_pread((int) new_comp->fd, &dyn_sym_hdr, sizeof(Elf64_Shdr),
+        comp_ehdr.e_shoff + comp_rela_plt_shdr.sh_link * sizeof(Elf64_Shdr));
+    Elf64_Sym *dyn_sym_tbl = malloc(dyn_sym_hdr.sh_size);
+    do_pread((int) new_comp->fd, dyn_sym_tbl, dyn_sym_hdr.sh_size,
+        dyn_sym_hdr.sh_offset);
+
+    Elf64_Shdr dyn_str_hdr;
+    do_pread((int) new_comp->fd, &dyn_str_hdr, sizeof(Elf64_Shdr),
+        comp_ehdr.e_shoff + dyn_sym_hdr.sh_link * sizeof(Elf64_Shdr));
+    char *dyn_str_tbl = malloc(dyn_str_hdr.sh_size);
+    do_pread((int) new_comp->fd, dyn_str_tbl, dyn_str_hdr.sh_size,
+        dyn_str_hdr.sh_offset);
+
+    new_comp->rela_maps = calloc(rela_count, sizeof(struct CompRelaMapping));
+    new_comp->rela_maps_count = rela_count;
+
+    // Log symbols that will need to be relocated eagerly at maptime
+    Elf64_Rela curr_rela;
+    for (size_t j = 0; j < new_comp->rela_maps_count; ++j)
     {
-        // Traverse `.rela.plt`, so we can see which function addresses we need
-        // to eagerly load
-        Elf64_Rela *comp_rela_plt = malloc(comp_rela_plt_shdr.sh_size);
-        do_pread((int) new_comp->fd, comp_rela_plt, comp_rela_plt_shdr.sh_size,
-            comp_rela_plt_shdr.sh_offset);
-        size_t rela_count = comp_rela_plt_shdr.sh_size / sizeof(Elf64_Rela);
-
-        Elf64_Shdr dyn_sym_hdr;
-        do_pread((int) new_comp->fd, &dyn_sym_hdr, sizeof(Elf64_Shdr),
-            comp_ehdr.e_shoff
-                + comp_rela_plt_shdr.sh_link * sizeof(Elf64_Shdr));
-        Elf64_Sym *dyn_sym_tbl = malloc(dyn_sym_hdr.sh_size);
-        do_pread((int) new_comp->fd, dyn_sym_tbl, dyn_sym_hdr.sh_size,
-            dyn_sym_hdr.sh_offset);
-
-        Elf64_Shdr dyn_str_hdr;
-        do_pread((int) new_comp->fd, &dyn_str_hdr, sizeof(Elf64_Shdr),
-            comp_ehdr.e_shoff + dyn_sym_hdr.sh_link * sizeof(Elf64_Shdr));
-        char *dyn_str_tbl = malloc(dyn_str_hdr.sh_size);
-        do_pread((int) new_comp->fd, dyn_str_tbl, dyn_str_hdr.sh_size,
-            dyn_str_hdr.sh_offset);
-
-        new_comp->rela_maps
-            = calloc(rela_count, sizeof(struct CompRelaMapping));
-        new_comp->rela_maps_count = rela_count;
-
-        // Log symbols that will need to be relocated eagerly at maptime
-        Elf64_Rela curr_rela;
-        for (size_t j = 0; j < new_comp->rela_maps_count; ++j)
+        curr_rela = comp_rela_plt[j];
+        size_t curr_rela_sym_idx = ELF64_R_SYM(curr_rela.r_info);
+        Elf64_Sym curr_rela_sym = dyn_sym_tbl[curr_rela_sym_idx];
+        char *curr_rela_name
+            = malloc(strlen(&dyn_str_tbl[curr_rela_sym.st_name]) + 1);
+        strcpy(curr_rela_name, &dyn_str_tbl[curr_rela_sym.st_name]);
+        if (ELF64_ST_BIND(curr_rela_sym.st_info) == STB_WEAK)
         {
-            curr_rela = comp_rela_plt[j];
-            size_t curr_rela_sym_idx = ELF64_R_SYM(curr_rela.r_info);
-            Elf64_Sym curr_rela_sym = dyn_sym_tbl[curr_rela_sym_idx];
-            char *curr_rela_name
-                = malloc(strlen(&dyn_str_tbl[curr_rela_sym.st_name]) + 1);
-            strcpy(curr_rela_name, &dyn_str_tbl[curr_rela_sym.st_name]);
-            if (ELF64_ST_BIND(curr_rela_sym.st_info) == STB_WEAK)
-            {
-                // Do not handle weak-bind symbols
-                // TODO should we?
-                struct CompRelaMapping crm = { curr_rela_name, 0, 0 };
-                new_comp->rela_maps[j] = crm;
-                continue;
-            } // TODO collapse
-
-            struct CompRelaMapping crm = { curr_rela_name,
-                curr_rela.r_offset + (char *) new_comp->base, NULL };
+            // Do not handle weak-bind symbols
+            // TODO should we?
+            struct CompRelaMapping crm = { curr_rela_name, 0, 0 };
             new_comp->rela_maps[j] = crm;
-        }
-        free(comp_rela_plt);
-        free(dyn_sym_tbl);
+            continue;
+        } // TODO collapse
 
-        // Find additional library dependencies
-        Elf64_Dyn *comp_dyn_entries = malloc(comp_dynamic_shdr.sh_size);
-        do_pread((int) new_comp->fd, comp_dyn_entries,
-            comp_dynamic_shdr.sh_size, comp_dynamic_shdr.sh_offset);
-
-        for (size_t i = 0; i < comp_dynamic_shdr.sh_size / sizeof(Elf64_Dyn);
-             ++i)
-        {
-            if (comp_dyn_entries[i].d_tag == DT_NEEDED)
-            {
-                struct LibDependency *new_lib_dep
-                    = malloc(sizeof(struct LibDependency));
-                new_lib_dep->lib_name = malloc(
-                    strlen(&dyn_str_tbl[comp_dyn_entries[i].d_un.d_val]) + 1);
-                strcpy(new_lib_dep->lib_name,
-                    &dyn_str_tbl[comp_dyn_entries[i].d_un.d_val]);
-                new_comp->lib_deps_count += 1;
-                new_comp->lib_deps = realloc(new_comp->lib_deps,
-                    new_comp->lib_deps_count * sizeof(struct LibDependency));
-                new_comp->lib_deps[new_comp->lib_deps_count - 1] = new_lib_dep;
-            }
-        }
-
-        free(dyn_str_tbl);
-        free(comp_dyn_entries);
+        struct CompRelaMapping crm = { curr_rela_name,
+            curr_rela.r_offset + (char *) new_comp->base, NULL };
+        new_comp->rela_maps[j] = crm;
     }
+    free(comp_rela_plt);
+    free(dyn_sym_tbl);
+
+    // Find additional library dependencies
+    Elf64_Dyn *comp_dyn_entries = malloc(comp_dynamic_shdr.sh_size);
+    do_pread((int) new_comp->fd, comp_dyn_entries, comp_dynamic_shdr.sh_size,
+        comp_dynamic_shdr.sh_offset);
+
+    for (size_t i = 0; i < comp_dynamic_shdr.sh_size / sizeof(Elf64_Dyn); ++i)
+    {
+        if (comp_dyn_entries[i].d_tag == DT_NEEDED)
+        {
+            struct LibDependency *new_lib_dep
+                = malloc(sizeof(struct LibDependency));
+            new_lib_dep->lib_name = malloc(
+                strlen(&dyn_str_tbl[comp_dyn_entries[i].d_un.d_val]) + 1);
+            strcpy(new_lib_dep->lib_name,
+                &dyn_str_tbl[comp_dyn_entries[i].d_un.d_val]);
+            new_comp->lib_deps_count += 1;
+            new_comp->lib_deps = realloc(new_comp->lib_deps,
+                new_comp->lib_deps_count * sizeof(struct LibDependency));
+            new_comp->lib_deps[new_comp->lib_deps_count - 1] = new_lib_dep;
+        }
+    }
+
+    free(dyn_str_tbl);
+    free(comp_dyn_entries);
 
     // Find library files in `COMP_LIBRARY_PATH` to fulfill dependencies
     for (size_t i = 0; i < new_comp->lib_deps_count; ++i)
@@ -335,22 +299,8 @@ comp_from_elf(char *filename, char **entry_points, size_t entry_point_count,
         struct CompEntryPoint *new_entry_point
             = malloc(sizeof(struct CompEntryPoint));
         new_entry_point->fn_name = entry_points[i];
-        switch (new_comp->elf_type)
-        {
-            case ET_DYN:
-            {
-                new_entry_point->fn_addr
-                    = (char *) new_comp->base + ep_syms[i].st_value;
-                break;
-            }
-            case ET_EXEC:
-            {
-                new_entry_point->fn_addr = (void *) ep_syms[i].st_value;
-                break;
-            }
-            default:
-                errx(1, "Invalid ELF type");
-        }
+        new_entry_point->fn_addr
+            = (char *) new_comp->base + ep_syms[i].st_value;
         new_comp->comp_eps[new_comp->entry_point_count] = new_entry_point;
         new_comp->entry_point_count += 1;
     }
@@ -361,23 +311,11 @@ comp_from_elf(char *filename, char **entry_points, size_t entry_point_count,
     const char *so_plt_suffix = "@plt";
     for (size_t i = 0; i < intercept_count; ++i)
     {
-        if (new_comp->elf_type == ET_DYN)
-        {
-            size_t to_intercept_name_len
-                = strlen(intercepts[i]) + strlen(so_plt_suffix) + 1;
-            intercept_names[i] = malloc(to_intercept_name_len);
-            strcpy(intercept_names[i], intercepts[i]);
-            strcat(intercept_names[i], so_plt_suffix);
-        }
-        else if (new_comp->elf_type == ET_EXEC)
-        {
-            intercept_names[i] = malloc(strlen(intercepts[i]) + 1);
-            strcpy(intercept_names[i], intercepts[i]);
-        }
-        else
-        {
-            errx(1, "Invalid ELF type");
-        }
+        size_t to_intercept_name_len
+            = strlen(intercepts[i]) + strlen(so_plt_suffix) + 1;
+        intercept_names[i] = malloc(to_intercept_name_len);
+        strcpy(intercept_names[i], intercepts[i]);
+        strcat(intercept_names[i], so_plt_suffix);
     }
     Elf64_Sym *intercept_syms
         = find_symbols((const char **) intercept_names, intercept_count, false,
