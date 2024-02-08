@@ -62,7 +62,8 @@ function(new_comp_test test_name)
 
     set_property(TARGET ${test_name} PROPERTY compartment TRUE)
     if (EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/${test_name}.comp)
-        set_property(TARGET ${test_name} PROPERTY compartment_config ${CMAKE_CURRENT_SOURCE_DIR}/${test_name}.comp)
+        set_property(TARGET ${test_name}
+                     PROPERTY compartment_config ${CMAKE_CURRENT_SOURCE_DIR}/${test_name}.comp)
     endif()
 endfunction()
 
@@ -118,6 +119,10 @@ set(func_binaries
 
 set(comp_binaries
     "simple"
+    "simple_libc"
+    "simple_call_internal"
+    "simple_call_external"
+    "simple_external"
     #"time"
     #"lua_simple"
     #"lua_script"
@@ -128,6 +133,9 @@ set(comp_binaries
 
 set(tests
     "simple"
+    "simple_libc"
+    "simple_call_internal"
+    "simple_call_external"
     #"time"
     #"lua_simple"
     #"lua_script"
@@ -162,7 +170,10 @@ foreach(func_t IN LISTS func_binaries)
 endforeach()
 
 # Additional dependencies
-new_dependency(test_map $<TARGET_FILE:simple>)
+target_link_libraries(simple_call_external PRIVATE simple_external)
+
+#new_dependency(test_map $<TARGET_FILE:simple>)
+new_dependency(simple_call_external $<TARGET_FILE:simple_external>)
 
 #new_dependency(lua_script ${CMAKE_CURRENT_SOURCE_DIR}/hello_world.lua)
 #new_dependency(test_args_near_unmapped $<TARGET_FILE:args_simple>)

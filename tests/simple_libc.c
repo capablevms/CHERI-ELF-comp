@@ -5,6 +5,7 @@
 int
 main(void)
 {
-    int x = 20;
-    return x - x;
+    assert(ceil(1.4) == 2);
+    assert(pow(2, 4) == 16);
+    return 0;
 }

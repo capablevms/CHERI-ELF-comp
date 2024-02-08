@@ -49,7 +49,7 @@ int
 main(int argc, char **argv)
 {
     size_t sum = 0;
-    for (size_t i = 0; i < argc; ++i)
+    for (int i = 0; i < argc; ++i)
     {
         sum += atoi(argv[i]);
     }

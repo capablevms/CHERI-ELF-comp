@@ -81,12 +81,12 @@ int
 my_fprintf(FILE *, const char *, ...);
 
 size_t
-my_call_comp(size_t, char *, void *, size_t);
+my_call_comp(size_t, char *, void *);
 static const struct FuncIntercept to_intercept_funcs[] = {
     /* Mem funcs */
-    { "malloc", (void *) my_malloc },
-    { "realloc", (void *) my_realloc },
-    { "free", (void *) my_free },
+    { "malloc", (void *) my_malloc, NULL },
+    { "realloc", (void *) my_realloc, NULL },
+    { "free", (void *) my_free, NULL },
 };
 //
 // Functions to be intercepted and associated data
