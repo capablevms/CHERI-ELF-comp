@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <fts.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -108,7 +109,7 @@ struct SegmentMap
  * via PLT/GOT, we update the expected addresses eagerly once the code is
  * mapped into memory, via `comp_map`
  */
-struct CompRelaMapping
+struct LibRelaMapping
 {
     char *rela_name;
     void *rela_address; // address of relocation in compartment
@@ -120,47 +121,61 @@ struct CompRelaMapping
 struct LibDependencySymbol
 {
     char *sym_name;
-    intptr_t sym_offset;
+    void *sym_offset;
 };
 
-/* Struct representing a library dependency for one of our given compartments
+/* Struct representing the result of searching for a library symbol in a
+ * compartment
+ */
+struct LibSymSearchResult
+{
+    unsigned short lib_idx;
+    unsigned short sym_idx;
+};
+
+/**
+ * Struct representing a library dependency for one of our given compartments
  */
 struct LibDependency
 {
     char *lib_name;
     char *lib_path;
+    void *lib_mem_base;
+
+    // Segments of interest (usually, of type `PT_LOAD`) within this library
     size_t lib_segs_count;
     size_t lib_segs_size;
-    void *lib_mem_base;
-    struct SegmentMap **lib_segs;
+    struct SegmentMap *lib_segs;
+
+    // Symbols within this library
     size_t lib_syms_count;
     struct LibDependencySymbol *lib_syms;
+
+    // Library dependencies for this library
+    unsigned short lib_dep_count;
+    char **lib_dep_names;
+
+    // Symbols within this library that need eager relocation
+    size_t rela_maps_count;
+    struct LibRelaMapping *rela_maps;
 };
 
-/* Struct representing ELF data necessary to load and eventually execute a
+/**
+ * Struct representing ELF data necessary to load and eventually execute a
  * compartment
  */
 struct Compartment
 {
     // Identifiers
     size_t id;
-    int fd;
-    Elf64_Half elf_type;
     // Execution info
-    Elf64_Half phdr;
     void *__capability ddc;
     // ELF data
     size_t size; // size of compartment in memory
     void *base; // address where to load compartment
-    size_t entry_point_count;
-    struct CompEntryPoint **comp_eps;
     void *mem_top;
     bool mapped;
-    bool mapped_full;
-    // Segments data
-    struct SegmentMap **segs;
-    size_t seg_count;
-    size_t segs_size;
+
     // Scratch memory
     void *scratch_mem_base;
     size_t scratch_mem_size;
@@ -172,24 +187,27 @@ struct Compartment
     void *stack_pointer;
     struct MemAlloc *alloc_head;
 
+    // TODO double check / rework this process
     void *manager_caps;
     size_t max_manager_caps_count;
     size_t active_manager_caps_count;
 
+    // Transition function (duplicated across compartments, but must be within
+    // to be within DDC bounds)
     void *mng_trans_fn;
     size_t mng_trans_fn_sz;
 
-    // Only for shared object compartments
-    size_t rela_maps_count;
-    struct CompRelaMapping *rela_maps;
-    size_t lib_deps_count;
-    struct LibDependency **lib_deps;
+    // Internal libraries and relocations
+    size_t libs_count;
+    struct LibDependency **libs;
+    size_t entry_point_count;
+    struct CompEntryPoint *entry_points;
 
     // Hardware info - maybe move
     size_t page_size;
 
     // Misc
-    short curr_intercept_count;
+    unsigned short curr_intercept_count;
     struct InterceptPatch *intercept_patches;
 };
 
@@ -214,16 +232,5 @@ comp_clean(struct Compartment *);
 
 struct Compartment *
 find_comp(struct Compartment *);
-
-static ssize_t
-do_pread(int, void *, size_t, off_t);
-static Elf64_Sym *
-find_symbols(const char **, size_t, bool, Elf64_Sym *, char *, size_t);
-static char *
-find_in_dir(const char *, char *);
-static void
-init_comp_scratch_mem(struct Compartment *);
-static void
-init_lib_dep_info(struct LibDependency *, struct Compartment *);
 
 #endif // _COMPARTMENT_H

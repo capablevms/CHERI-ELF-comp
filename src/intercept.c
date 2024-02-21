@@ -99,7 +99,8 @@ my_free(void *ptr)
 }
 
 size_t
-my_call_comp(size_t comp_id, char *fn_name, void *args, size_t args_count)
+my_call_comp(
+    size_t comp_id, char *fn_name, void *args) // TODO , size_t args_count)
 {
     struct Compartment *to_call = manager_get_compartment_by_id(comp_id);
     return exec_comp(to_call, fn_name, args);
