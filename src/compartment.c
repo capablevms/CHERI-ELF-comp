@@ -264,16 +264,6 @@ comp_add_intercept(struct Compartment *new_comp, uintptr_t intercept_target,
     new_comp->intercept_patches[new_comp->curr_intercept_count - 1] = new_patch;
 }
 
-void
-comp_stack_push(
-    struct Compartment *comp, const void *to_push, size_t to_push_sz)
-{
-    comp->stack_pointer = (char *) comp->stack_pointer - to_push_sz;
-    memcpy((void *) comp->stack_pointer, to_push, to_push_sz);
-    assert(comp->stack_pointer > (void *) ((char *) comp->scratch_mem_stack_top
-               - comp->scratch_mem_stack_size));
-}
-
 /* Map a struct Compartment into memory, making it ready for execution
  */
 void
