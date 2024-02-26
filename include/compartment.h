@@ -220,8 +220,6 @@ comp_from_elf(char *, char **, size_t, char **, void **, size_t, void *);
 void
 comp_add_intercept(struct Compartment *, uintptr_t, uintptr_t);
 void
-comp_stack_push(struct Compartment *, const void *, size_t);
-void
 comp_map(struct Compartment *);
 void
 comp_map_full(struct Compartment *);
