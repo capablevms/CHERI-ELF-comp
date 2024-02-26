@@ -111,6 +111,7 @@ endfunction()
 
 # Library tests
 set(func_binaries
+    "so_harness"
     "test_map"
     #"test_args_near_unmapped"
     #"test_two_comps"
@@ -123,6 +124,8 @@ set(comp_binaries
     "simple_call_internal"
     "simple_call_external"
     "simple_external"
+    "simple_syscall_getpid"
+    "simple_syscall_write"
     #"time"
     #"lua_simple"
     #"lua_script"
@@ -136,6 +139,8 @@ set(tests
     "simple_libc"
     "simple_call_internal"
     "simple_call_external"
+    "simple_syscall_getpid"
+    "simple_syscall_write"
     #"time"
     #"lua_simple"
     #"lua_script"
