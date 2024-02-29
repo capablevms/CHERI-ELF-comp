@@ -122,10 +122,18 @@ set(comp_binaries
     "simple"
     "simple_libc"
     "simple_call_internal"
+    "simple_call_internal_static"
+    "simple_call_internal_weak"
     "simple_call_external"
+    "simple_static_var"
+    "simple_static_var-external"
     "simple_external"
     "simple_syscall_getpid"
     "simple_syscall_write"
+    "simple_va_args"
+    "simple_fputs"
+    "simple_printf"
+    "simple_fopen"
     #"time"
     #"lua_simple"
     #"lua_script"
@@ -138,9 +146,16 @@ set(tests
     "simple"
     "simple_libc"
     "simple_call_internal"
+    "simple_call_internal_static"
+    #"simple_call_internal_weak"
     "simple_call_external"
+    "simple_static_var"
     "simple_syscall_getpid"
     "simple_syscall_write"
+    "simple_va_args"
+    #"simple_fputs"
+    #"simple_printf"
+    "simple_fopen"
     #"time"
     #"lua_simple"
     #"lua_script"
@@ -176,9 +191,12 @@ endforeach()
 
 # Additional dependencies
 target_link_libraries(simple_call_external PRIVATE simple_external)
+new_dependency(simple_call_external $<TARGET_FILE:simple_external>)
+
+target_link_libraries(simple_static_var PRIVATE simple_static_var-external)
+new_dependency(simple_static_var $<TARGET_FILE:simple_static_var-external>)
 
 #new_dependency(test_map $<TARGET_FILE:simple>)
-new_dependency(simple_call_external $<TARGET_FILE:simple_external>)
 
 #new_dependency(lua_script ${CMAKE_CURRENT_SOURCE_DIR}/hello_world.lua)
 #new_dependency(test_args_near_unmapped $<TARGET_FILE:args_simple>)
