@@ -15,7 +15,7 @@ parse_lib_segs(Elf64_Ehdr *, int, struct LibDependency *, struct Compartment *);
 static void
 parse_lib_symtb(Elf64_Shdr *, Elf64_Ehdr *, int, struct LibDependency *);
 static void
-parse_lib_relaplt(Elf64_Shdr *, Elf64_Ehdr *, int, struct LibDependency *);
+parse_lib_rela(Elf64_Shdr *, Elf64_Ehdr *, int, struct LibDependency *);
 static void
 parse_lib_dynamic_deps(Elf64_Shdr *, Elf64_Ehdr *, int, struct LibDependency *);
 static void
@@ -25,7 +25,7 @@ find_comp_intercepts(char **, void **, size_t, struct Compartment *);
 static void
 resolve_rela_syms(struct Compartment *);
 static struct LibSymSearchResult
-find_lib_dep_sym_in_comp(const char *, struct Compartment *);
+find_lib_dep_sym_in_comp(const char *, struct Compartment *, unsigned short);
 static void *
 extract_sym_offset(struct Compartment *, struct LibSymSearchResult);
 
@@ -126,6 +126,7 @@ comp_from_elf(char *filename, char **entry_points, size_t entry_point_count,
     {
         struct LibDependency *parsed_lib
             = parse_lib_file(libs_to_parse[libs_parsed_count], new_comp);
+        print_lib_dep(parsed_lib);
 
         const unsigned short libs_to_search_count = libs_to_parse_count;
         for (size_t i = 0; i < parsed_lib->lib_dep_count; ++i)
@@ -567,7 +568,7 @@ parse_lib_file(char *lib_name, struct Compartment *new_comp)
     // that this can be changed in future specifications.
     //
     // Source: https://refspecs.linuxfoundation.org/elf/elf.pdf
-    const size_t headers_of_interest_count = 3;
+    const size_t headers_of_interest_count = 4;
     size_t found_headers = 0;
     Elf64_Shdr curr_shdr;
     for (size_t i = 0; i < lib_ehdr.e_shnum; ++i)
@@ -584,7 +585,13 @@ parse_lib_file(char *lib_name, struct Compartment *new_comp)
         else if (curr_shdr.sh_type == SHT_RELA
             && !strcmp(&shstrtab[curr_shdr.sh_name], ".rela.plt"))
         {
-            parse_lib_relaplt(&curr_shdr, &lib_ehdr, lib_fd, new_lib);
+            parse_lib_rela(&curr_shdr, &lib_ehdr, lib_fd, new_lib);
+            found_headers += 1;
+        }
+        else if (curr_shdr.sh_type == SHT_RELA
+            && !strcmp(&shstrtab[curr_shdr.sh_name], ".rela.dyn"))
+        {
+            parse_lib_rela(&curr_shdr, &lib_ehdr, lib_fd, new_lib);
             found_headers += 1;
         }
         // Lookup `.dynamic` to find library dependencies
@@ -679,11 +686,6 @@ parse_lib_symtb(Elf64_Shdr *symtb_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
     for (size_t j = 0; j < lib_dep->lib_syms_count; ++j)
     {
         curr_sym = sym_tb[j];
-        // TODO only handling FUNC symbols for now
-        if (ELF64_ST_TYPE(curr_sym.st_info) != STT_FUNC)
-        {
-            continue;
-        }
         if (curr_sym.st_value == 0)
         {
             continue;
@@ -692,6 +694,7 @@ parse_lib_symtb(Elf64_Shdr *symtb_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
         char *sym_name = &str_tb[curr_sym.st_name];
         ld_syms[actual_syms].sym_name = malloc(strlen(sym_name) + 1);
         strcpy(ld_syms[actual_syms].sym_name, sym_name);
+        ld_syms[actual_syms].sym_type = ELF64_ST_TYPE(curr_sym.st_info);
         actual_syms += 1;
     }
     ld_syms
@@ -704,19 +707,18 @@ parse_lib_symtb(Elf64_Shdr *symtb_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
 }
 
 static void
-parse_lib_relaplt(Elf64_Shdr *rela_plt_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
+parse_lib_rela(Elf64_Shdr *rela_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
     struct LibDependency *lib_dep)
 {
     // Traverse `.rela.plt`, so we can see which function addresses we need
     // to eagerly load
-    Elf64_Rela *rela_plt = malloc(rela_plt_shdr->sh_size);
-    do_pread(
-        lib_fd, rela_plt, rela_plt_shdr->sh_size, rela_plt_shdr->sh_offset);
-    size_t rela_count = rela_plt_shdr->sh_size / sizeof(Elf64_Rela);
+    Elf64_Rela *rela_sec = malloc(rela_shdr->sh_size);
+    do_pread(lib_fd, rela_sec, rela_shdr->sh_size, rela_shdr->sh_offset);
+    size_t rela_count = rela_shdr->sh_size / sizeof(Elf64_Rela);
 
     Elf64_Shdr dyn_sym_hdr;
     do_pread(lib_fd, &dyn_sym_hdr, sizeof(Elf64_Shdr),
-        lib_ehdr->e_shoff + rela_plt_shdr->sh_link * sizeof(Elf64_Shdr));
+        lib_ehdr->e_shoff + rela_shdr->sh_link * sizeof(Elf64_Shdr));
     Elf64_Sym *dyn_sym_tbl = malloc(dyn_sym_hdr.sh_size);
     do_pread(lib_fd, dyn_sym_tbl, dyn_sym_hdr.sh_size, dyn_sym_hdr.sh_offset);
 
@@ -726,16 +728,36 @@ parse_lib_relaplt(Elf64_Shdr *rela_plt_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
     char *dyn_str_tbl = malloc(dyn_str_hdr.sh_size);
     do_pread(lib_fd, dyn_str_tbl, dyn_str_hdr.sh_size, dyn_str_hdr.sh_offset);
 
-    lib_dep->rela_maps = malloc(rela_count * sizeof(struct LibRelaMapping));
-    lib_dep->rela_maps_count = rela_count;
+    struct LibRelaMapping *new_relas
+        = malloc(rela_count * sizeof(struct LibRelaMapping));
 
     // Log symbols that will need to be relocated eagerly at maptime
     Elf64_Rela curr_rela;
-    for (size_t j = 0; j < lib_dep->rela_maps_count; ++j)
+    size_t actual_relas = 0;
+    for (size_t j = 0; j < rela_count; ++j)
     {
-        curr_rela = rela_plt[j];
+        curr_rela = rela_sec[j];
         size_t curr_rela_sym_idx = ELF64_R_SYM(curr_rela.r_info);
         Elf64_Sym curr_rela_sym = dyn_sym_tbl[curr_rela_sym_idx];
+
+        // Filter out some `libc` symbols we don't want to handle
+        // TODO at least right now
+        if (!strcmp(&dyn_str_tbl[curr_rela_sym.st_name], "environ"))
+        {
+            warnx("Currently not relocating symbol `environ` from library %s - "
+                  "using within a container might cause a crash.",
+                lib_dep->lib_name);
+            continue;
+        }
+        else if (!strcmp(&dyn_str_tbl[curr_rela_sym.st_name], "__progname"))
+        {
+            warnx(
+                "Currently not relocating symbol `__progname` from library %s "
+                "- using within a container might cause a crash.",
+                lib_dep->lib_name);
+            continue;
+        }
+
         char *curr_rela_name
             = malloc(strlen(&dyn_str_tbl[curr_rela_sym.st_name]) + 1);
         strcpy(curr_rela_name, &dyn_str_tbl[curr_rela_sym.st_name]);
@@ -744,16 +766,38 @@ parse_lib_relaplt(Elf64_Shdr *rela_plt_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
         {
             // Do not handle weak-bind symbols
             // TODO should we?
-            lrm = (struct LibRelaMapping) { curr_rela_name, 0, 0 };
+            continue;
         }
-        else
+        if (curr_rela_sym_idx == 0)
         {
-            lrm = (struct LibRelaMapping) { curr_rela_name,
-                curr_rela.r_offset + (char *) lib_dep->lib_mem_base, NULL };
+            // TODO In some test programs, there are some relocations with no
+            // name and some weird value; we currently filter them out, but
+            // they might mean something in the future
+            continue;
         }
-        lib_dep->rela_maps[j] = lrm;
+
+        // TODO haven't handled addends on relocations yet
+        assert(curr_rela.r_addend == 0);
+
+        new_relas[actual_relas] = (struct LibRelaMapping) { curr_rela_name,
+            curr_rela.r_offset + (char *) lib_dep->lib_mem_base, NULL,
+            ELF64_R_TYPE(curr_rela.r_info) };
+        if (curr_rela_sym.st_value != 0)
+        {
+            new_relas[actual_relas].target_func_address
+                = curr_rela_sym.st_value + (char *) lib_dep->lib_mem_base;
+        }
+        actual_relas += 1;
     }
-    free(rela_plt);
+    lib_dep->rela_maps = realloc(lib_dep->rela_maps,
+        (lib_dep->rela_maps_count + actual_relas)
+            * sizeof(struct LibRelaMapping));
+    memcpy(&lib_dep->rela_maps[lib_dep->rela_maps_count], new_relas,
+        actual_relas * sizeof(struct LibRelaMapping));
+    lib_dep->rela_maps_count += actual_relas;
+
+    free(new_relas);
+    free(rela_sec);
     free(dyn_sym_tbl);
     free(dyn_str_tbl);
 }
@@ -799,7 +843,7 @@ find_comp_entry_points(
     for (size_t i = 0; i < entry_point_count; ++i)
     {
         struct LibSymSearchResult found_sym
-            = find_lib_dep_sym_in_comp(entry_points[i], new_comp);
+            = find_lib_dep_sym_in_comp(entry_points[i], new_comp, STT_FUNC);
         if (found_sym.lib_idx == USHRT_MAX)
         {
             errx(1, "Did not find entry point %s!\n", entry_points[i]);
@@ -829,7 +873,7 @@ find_comp_intercepts(char **intercepts, void **intercept_addrs,
     for (size_t i = 0; i < intercept_count; ++i)
     {
         struct LibSymSearchResult found_sym
-            = find_lib_dep_sym_in_comp(intercept_names[i], new_comp);
+            = find_lib_dep_sym_in_comp(intercept_names[i], new_comp, STT_FUNC);
         if (found_sym.lib_idx == USHRT_MAX)
         {
             continue;
@@ -852,19 +896,43 @@ resolve_rela_syms(struct Compartment *new_comp)
     {
         for (size_t j = 0; j < new_comp->libs[i]->rela_maps_count; ++j)
         {
-            // Ignore relocations we don't want to load, as earlier set on
-            // lookup (e.g., weak-bound symbols)
-            if (new_comp->libs[i]->rela_maps[j].rela_address == 0)
+            if (new_comp->libs[i]->rela_maps[j].target_func_address != 0)
             {
                 continue;
             }
 
+            unsigned short sym_to_find_type;
+            if (new_comp->libs[i]->rela_maps[j].rela_type
+                == R_AARCH64_JUMP_SLOT)
+            {
+                sym_to_find_type = STT_FUNC;
+            }
+            else if (new_comp->libs[i]->rela_maps[j].rela_type
+                == R_AARCH64_GLOB_DAT)
+            {
+                sym_to_find_type = STT_OBJECT;
+            }
+            else
+            {
+                continue;
+                // TODO do we want to handle other / all relocation types?
+                /*errx(1, "Unhandled relocation symbol of type `%hu` for symbol
+                 * `%s` of library `%s`!\n",
+                 * new_comp->libs[i]->rela_maps[j].rela_type,
+                 * new_comp->libs[i]->rela_maps[j].rela_name,
+                 * new_comp->libs[i]->lib_name);*/
+            }
+
             struct LibSymSearchResult found_sym = find_lib_dep_sym_in_comp(
-                new_comp->libs[i]->rela_maps[j].rela_name, new_comp);
+                new_comp->libs[i]->rela_maps[j].rela_name, new_comp,
+                sym_to_find_type);
             if (found_sym.lib_idx == USHRT_MAX)
             {
-                errx(1, "Did not find symbol %s!\n",
-                    new_comp->libs[i]->rela_maps[j].rela_name);
+                errx(1,
+                    "Did not find symbol %s of type %hu (idx %zu in library %s "
+                    "(idx %zu))!\n",
+                    new_comp->libs[i]->rela_maps[j].rela_name, sym_to_find_type,
+                    j, new_comp->libs[i]->lib_name, i);
             }
             new_comp->libs[i]->rela_maps[j].target_func_address
                 = extract_sym_offset(new_comp, found_sym);
@@ -903,14 +971,15 @@ extract_sym_offset(struct Compartment *comp, struct LibSymSearchResult res)
 }
 
 static struct LibSymSearchResult
-find_lib_dep_sym_in_comp(
-    const char *to_find, struct Compartment *comp_to_search)
+find_lib_dep_sym_in_comp(const char *to_find,
+    struct Compartment *comp_to_search, const unsigned short sym_type)
 {
     for (size_t i = 0; i < comp_to_search->libs_count; ++i)
     {
         for (size_t j = 0; j < comp_to_search->libs[i]->lib_syms_count; ++j)
         {
-            if (!strcmp(to_find, comp_to_search->libs[i]->lib_syms[j].sym_name))
+            if (!strcmp(to_find, comp_to_search->libs[i]->lib_syms[j].sym_name)
+                && comp_to_search->libs[i]->lib_syms[j].sym_type == sym_type)
             {
                 struct LibSymSearchResult res = { i, j };
                 return res;

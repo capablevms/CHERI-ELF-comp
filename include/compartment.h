@@ -114,6 +114,7 @@ struct LibRelaMapping
     char *rela_name;
     void *rela_address; // address of relocation in compartment
     void *target_func_address; // address of actual function
+    unsigned short rela_type;
 };
 
 /* Struct representing a symbol entry of a dependency library
@@ -122,6 +123,7 @@ struct LibDependencySymbol
 {
     char *sym_name;
     void *sym_offset;
+    unsigned short sym_type;
 };
 
 /* Struct representing the result of searching for a library symbol in a
