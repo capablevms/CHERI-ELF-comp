@@ -126,7 +126,6 @@ comp_from_elf(char *filename, char **entry_points, size_t entry_point_count,
     {
         struct LibDependency *parsed_lib
             = parse_lib_file(libs_to_parse[libs_parsed_count], new_comp);
-        print_lib_dep(parsed_lib);
 
         const unsigned short libs_to_search_count = libs_to_parse_count;
         for (size_t i = 0; i < parsed_lib->lib_dep_count; ++i)
@@ -348,7 +347,8 @@ comp_map(struct Compartment *to_map)
     {
         for (size_t j = 0; j < to_map->libs[i]->rela_maps_count; ++j)
         {
-            if (to_map->libs[i]->rela_maps[j].rela_address == 0)
+            assert(to_map->libs[i]->rela_maps[j].rela_address != 0);
+            if (to_map->libs[i]->rela_maps[j].target_func_address == 0)
             {
                 continue;
             }
@@ -695,6 +695,7 @@ parse_lib_symtb(Elf64_Shdr *symtb_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
         ld_syms[actual_syms].sym_name = malloc(strlen(sym_name) + 1);
         strcpy(ld_syms[actual_syms].sym_name, sym_name);
         ld_syms[actual_syms].sym_type = ELF64_ST_TYPE(curr_sym.st_info);
+        ld_syms[actual_syms].sym_bind = ELF64_ST_BIND(curr_sym.st_info);
         actual_syms += 1;
     }
     ld_syms
@@ -739,6 +740,13 @@ parse_lib_rela(Elf64_Shdr *rela_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
         curr_rela = rela_sec[j];
         size_t curr_rela_sym_idx = ELF64_R_SYM(curr_rela.r_info);
         Elf64_Sym curr_rela_sym = dyn_sym_tbl[curr_rela_sym_idx];
+        if (curr_rela_sym_idx == 0)
+        {
+            // TODO In some test programs, there are some relocations with no
+            // name and some weird value; we currently filter them out, but
+            // they might mean something in the future
+            continue;
+        }
 
         // Filter out some `libc` symbols we don't want to handle
         // TODO at least right now
@@ -762,26 +770,14 @@ parse_lib_rela(Elf64_Shdr *rela_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
             = malloc(strlen(&dyn_str_tbl[curr_rela_sym.st_name]) + 1);
         strcpy(curr_rela_name, &dyn_str_tbl[curr_rela_sym.st_name]);
         struct LibRelaMapping lrm;
-        if (ELF64_ST_BIND(curr_rela_sym.st_info) == STB_WEAK)
-        {
-            // Do not handle weak-bind symbols
-            // TODO should we?
-            continue;
-        }
-        if (curr_rela_sym_idx == 0)
-        {
-            // TODO In some test programs, there are some relocations with no
-            // name and some weird value; we currently filter them out, but
-            // they might mean something in the future
-            continue;
-        }
 
         // TODO haven't handled addends on relocations yet
         assert(curr_rela.r_addend == 0);
 
         new_relas[actual_relas] = (struct LibRelaMapping) { curr_rela_name,
             curr_rela.r_offset + (char *) lib_dep->lib_mem_base, NULL,
-            ELF64_R_TYPE(curr_rela.r_info) };
+            ELF64_ST_TYPE(curr_rela_sym.st_info),
+            ELF64_ST_BIND(curr_rela_sym.st_info) };
         if (curr_rela_sym.st_value != 0)
         {
             new_relas[actual_relas].target_func_address
@@ -896,45 +892,37 @@ resolve_rela_syms(struct Compartment *new_comp)
     {
         for (size_t j = 0; j < new_comp->libs[i]->rela_maps_count; ++j)
         {
-            if (new_comp->libs[i]->rela_maps[j].target_func_address != 0)
+            struct LibRelaMapping *curr_rela_map
+                = &new_comp->libs[i]->rela_maps[j];
+            if (curr_rela_map->target_func_address != 0)
             {
                 continue;
             }
 
-            unsigned short sym_to_find_type;
-            if (new_comp->libs[i]->rela_maps[j].rela_type
-                == R_AARCH64_JUMP_SLOT)
-            {
-                sym_to_find_type = STT_FUNC;
-            }
-            else if (new_comp->libs[i]->rela_maps[j].rela_type
-                == R_AARCH64_GLOB_DAT)
-            {
-                sym_to_find_type = STT_OBJECT;
-            }
-            else
-            {
-                continue;
-                // TODO do we want to handle other / all relocation types?
-                /*errx(1, "Unhandled relocation symbol of type `%hu` for symbol
-                 * `%s` of library `%s`!\n",
-                 * new_comp->libs[i]->rela_maps[j].rela_type,
-                 * new_comp->libs[i]->rela_maps[j].rela_name,
-                 * new_comp->libs[i]->lib_name);*/
-            }
-
-            struct LibSymSearchResult found_sym = find_lib_dep_sym_in_comp(
-                new_comp->libs[i]->rela_maps[j].rela_name, new_comp,
-                sym_to_find_type);
+            struct LibSymSearchResult found_sym
+                = find_lib_dep_sym_in_comp(curr_rela_map->rela_name, new_comp,
+                    curr_rela_map->rela_sym_type);
             if (found_sym.lib_idx == USHRT_MAX)
             {
-                errx(1,
-                    "Did not find symbol %s of type %hu (idx %zu in library %s "
-                    "(idx %zu))!\n",
-                    new_comp->libs[i]->rela_maps[j].rela_name, sym_to_find_type,
-                    j, new_comp->libs[i]->lib_name, i);
+                if (curr_rela_map->rela_sym_bind == STB_WEAK)
+                {
+                    warnx("Did not find WEAK symbol %s of type %hu (idx %zu in "
+                          "library %s (idx %zu)) - execution *might* fault.",
+                        curr_rela_map->rela_name, curr_rela_map->rela_sym_type,
+                        j, new_comp->libs[i]->lib_name, i);
+                    continue;
+                }
+                else
+                {
+                    errx(1,
+                        "Did not find symbol %s of type %hu (idx %zu in "
+                        "library %s "
+                        "(idx %zu))!",
+                        curr_rela_map->rela_name, curr_rela_map->rela_sym_type,
+                        j, new_comp->libs[i]->lib_name, i);
+                }
             }
-            new_comp->libs[i]->rela_maps[j].target_func_address
+            curr_rela_map->target_func_address
                 = extract_sym_offset(new_comp, found_sym);
         }
     }
@@ -978,7 +966,9 @@ find_lib_dep_sym_in_comp(const char *to_find,
     {
         for (size_t j = 0; j < comp_to_search->libs[i]->lib_syms_count; ++j)
         {
-            if (!strcmp(to_find, comp_to_search->libs[i]->lib_syms[j].sym_name)
+            if (comp_to_search->libs[i]->lib_syms[j].sym_bind != STB_LOCAL
+                && !strcmp(
+                    to_find, comp_to_search->libs[i]->lib_syms[j].sym_name)
                 && comp_to_search->libs[i]->lib_syms[j].sym_type == sym_type)
             {
                 struct LibSymSearchResult res = { i, j };

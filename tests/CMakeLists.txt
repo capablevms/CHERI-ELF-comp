@@ -147,7 +147,7 @@ set(tests
     "simple_libc"
     "simple_call_internal"
     "simple_call_internal_static"
-    #"simple_call_internal_weak"
+    "simple_call_internal_weak"
     "simple_call_external"
     "simple_static_var"
     "simple_syscall_getpid"

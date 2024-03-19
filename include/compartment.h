@@ -114,7 +114,8 @@ struct LibRelaMapping
     char *rela_name;
     void *rela_address; // address of relocation in compartment
     void *target_func_address; // address of actual function
-    unsigned short rela_type;
+    unsigned short rela_sym_type; // type of underlying symbol
+    unsigned short rela_sym_bind; // bind of underlying symbol
 };
 
 /* Struct representing a symbol entry of a dependency library
@@ -124,10 +125,12 @@ struct LibDependencySymbol
     char *sym_name;
     void *sym_offset;
     unsigned short sym_type;
+    unsigned short sym_bind;
 };
 
 /* Struct representing the result of searching for a library symbol in a
- * compartment
+ * compartment; for simplicity, we store the respective library index within
+ * the compartment, and symbol index within the library's symbols
  */
 struct LibSymSearchResult
 {
