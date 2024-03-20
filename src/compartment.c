@@ -6,8 +6,6 @@ const char *libs_path_env_var = "COMP_LIBRARY_PATH";
  * Forward declarations
  ******************************************************************************/
 
-static void
-get_lib_name(struct LibDependency *, const char *);
 static struct LibDependency *
 parse_lib_file(char *, struct Compartment *);
 static void
@@ -20,8 +18,6 @@ static void
 parse_lib_dynamic_deps(Elf64_Shdr *, Elf64_Ehdr *, int, struct LibDependency *);
 static void
 find_comp_entry_points(char **, size_t, struct Compartment *);
-static void
-find_comp_intercepts(char **, void **, size_t, struct Compartment *);
 static void
 resolve_rela_syms(struct Compartment *);
 static struct LibSymSearchResult
@@ -87,9 +83,6 @@ comp_init()
 
     new_comp->page_size = sysconf(_SC_PAGESIZE);
 
-    new_comp->curr_intercept_count = 0;
-    new_comp->intercept_patches = NULL;
-
     return new_comp;
 }
 
@@ -108,7 +101,6 @@ entry_point_cmp(const void *val1, const void *val2)
  */
 struct Compartment *
 comp_from_elf(char *filename, char **entry_points, size_t entry_point_count,
-    char **intercepts, void **intercept_addrs, size_t intercept_count,
     void *new_comp_base)
 {
     struct Compartment *new_comp = comp_init();
@@ -156,112 +148,9 @@ comp_from_elf(char *filename, char **entry_points, size_t entry_point_count,
     new_comp->mem_top = new_comp->scratch_mem_stack_top;
 
     find_comp_entry_points(entry_points, entry_point_count, new_comp);
-    find_comp_intercepts(
-        intercepts, intercept_addrs, intercept_count, new_comp);
     resolve_rela_syms(new_comp);
 
     return new_comp;
-}
-
-/* For a given Compartment `new_comp`, an address `intercept_target` pointing
- * to a function found within the compartment which we would like to intercept,
- * and a `intercept_data` struct representing information to perform the
- * intercept, synthesize and inject intructions at the call point of the
- * `intercept_target`, in order to perform a transition out of the compartment
- * to call the appropriate function with higher privileges.
- */
-void
-comp_add_intercept(struct Compartment *new_comp, uintptr_t intercept_target,
-    uintptr_t redirect_addr)
-{
-    // TODO check whether negative values break anything in all these generated
-    // functions
-    int32_t new_instrs[INTERCEPT_INSTR_COUNT];
-    size_t new_instr_idx = 0;
-    const ptraddr_t comp_manager_cap_addr = (ptraddr_t) new_comp->manager_caps
-        + new_comp->active_manager_caps_count
-            * sizeof(void *__capability); // TODO
-
-    const int32_t arm_function_target_register = 0b01010; // use `x10` for now
-    const int32_t arm_transition_target_register = 0b01011; // use `x11` for now
-
-    // `x10` is used to hold the address of the manager function we want to
-    // execute after a jump out of the compartment
-    // TODO ideally we want 1 `movz` and 3 `movk`, to be able to access any
-    // address, but this is sufficient for now
-    // movz x0, $target_fn_addr:lo16
-    // movk x0, $target_fn_addr:hi16
-    assert(intercept_target < ((ptraddr_t) 1 << 32));
-    const uint32_t arm_movz_instr_mask = 0b11010010100 << 21;
-    const uint32_t arm_movk_instr_mask = 0b11110010101 << 21;
-    const ptraddr_t target_address_lo16 = (redirect_addr & ((1 << 16) - 1))
-        << 5;
-    const ptraddr_t target_address_hi16 = (redirect_addr >> 16) << 5;
-    const int32_t arm_movz_intr = arm_movz_instr_mask | target_address_lo16
-        | arm_function_target_register;
-    const int32_t arm_movk_intr = arm_movk_instr_mask | target_address_hi16
-        | arm_function_target_register;
-    new_instrs[new_instr_idx++] = arm_movz_intr;
-    new_instrs[new_instr_idx++] = arm_movk_intr;
-
-    /* `ldpbr` instr generation */
-    // TODO do we have space to insert these instructions?
-    // TODO what if we need to jump more than 4GB away?
-    // Use `adrp` to get address close to address of manager capability required
-    // adrp x11, $OFFSET
-    const uint32_t arm_adrp_instr_mask = 0b10010000 << 24;
-    const ptraddr_t target_address
-        = (comp_manager_cap_addr >> 12) - (intercept_target >> 12);
-    assert(target_address < ((ptraddr_t) 1 << 32));
-    const int32_t arm_adrp_immlo = (target_address & 0b11) << 29;
-    const int32_t arm_adrp_immhi = (target_address >> 2) << 5;
-    const int32_t arm_adrp_instr = arm_adrp_instr_mask | arm_adrp_immlo
-        | arm_adrp_immhi | arm_transition_target_register;
-    new_instrs[new_instr_idx++] = arm_adrp_instr;
-
-    // `ldr` capability within compartment pointing to manager capabilities
-    // ldr (unsigned offset, capability, normal base)
-    // `ldr c11, [x11, $OFFSET]`
-    const uint32_t arm_ldr_instr_mask = 0b1100001001
-        << 22; // includes 0b00 bits for `op` field
-    ptraddr_t arm_ldr_pcc_offset
-        = comp_manager_cap_addr; // offset within 4KB page
-    ptraddr_t offset_correction = align_down(comp_manager_cap_addr, 1 << 12);
-    arm_ldr_pcc_offset -= offset_correction;
-
-    assert(arm_ldr_pcc_offset < 65520); // from ISA documentation
-    assert(arm_ldr_pcc_offset % 16 == 0);
-    arm_ldr_pcc_offset = arm_ldr_pcc_offset << 10;
-    const int32_t arm_ldr_base_register = arm_transition_target_register
-        << 5; // use `x11` for now
-    const int32_t arm_ldr_dest_register
-        = arm_transition_target_register; // use `c11` for now
-    const int32_t arm_ldr_instr = arm_ldr_instr_mask | arm_ldr_pcc_offset
-        | arm_ldr_base_register | arm_ldr_dest_register;
-    new_instrs[new_instr_idx++] = arm_ldr_instr;
-
-    // `b` instr generation
-    ptraddr_t arm_b_instr_offset
-        = (((uintptr_t) new_comp->mng_trans_fn)
-              - (intercept_target + new_instr_idx * sizeof(uint32_t)))
-        / 4;
-    assert(arm_b_instr_offset < (1 << 27));
-    arm_b_instr_offset &= (1 << 26) - 1;
-    const uint32_t arm_b_instr_mask = 0b101 << 26;
-    uintptr_t arm_b_instr = arm_b_instr_mask | arm_b_instr_offset;
-    new_instrs[new_instr_idx++] = arm_b_instr;
-
-    assert(new_instr_idx == INTERCEPT_INSTR_COUNT);
-    struct InterceptPatch new_patch;
-    new_patch.patch_addr = (void *) intercept_target;
-    memcpy(new_patch.instr, new_instrs, sizeof(new_instrs));
-    __clear_cache(new_patch.instr, new_patch.instr + sizeof(new_instrs));
-    new_patch.comp_manager_cap_addr = comp_manager_cap_addr;
-    new_patch.manager_cap = sealed_redirect_cap;
-    new_comp->curr_intercept_count += 1;
-    new_comp->intercept_patches = realloc(new_comp->intercept_patches,
-        new_comp->curr_intercept_count * sizeof(struct InterceptPatch));
-    new_comp->intercept_patches[new_comp->curr_intercept_count - 1] = new_patch;
 }
 
 /* Map a struct Compartment into memory, making it ready for execution
@@ -322,20 +211,6 @@ comp_map(struct Compartment *to_map)
     if (map_result == MAP_FAILED)
     {
         err(1, "Error mapping compartment %zu stack!\n", to_map->id);
-    }
-
-    // Inject intercept instructions within identified intercepted functions
-    for (unsigned short i = 0; i < to_map->curr_intercept_count; ++i)
-    {
-        struct InterceptPatch to_patch = to_map->intercept_patches[i];
-        // TODO change to memcpy?
-        for (size_t j = 0; j < INTERCEPT_INSTR_COUNT; ++j)
-        {
-            int32_t *curr_addr = to_patch.patch_addr + j;
-            *curr_addr = to_patch.instr[j];
-        }
-        *((void *__capability *) to_patch.comp_manager_cap_addr)
-            = to_patch.manager_cap;
     }
 
     // Inject manager transfer function
@@ -457,7 +332,10 @@ comp_clean(struct Compartment *to_clean)
         // Clean library relocation mappings
         for (j = 0; j < curr_lib_dep->rela_maps_count; ++j)
         {
-            free(curr_lib_dep->rela_maps[j].rela_name);
+            if (curr_lib_dep->rela_maps[j].rela_name)
+            {
+                free(curr_lib_dep->rela_maps[j].rela_name);
+            }
         }
         free(curr_lib_dep->rela_maps);
 
@@ -467,7 +345,6 @@ comp_clean(struct Compartment *to_clean)
     }
     free(to_clean->libs);
     free(to_clean->entry_points);
-    free(to_clean->intercept_patches);
     free(to_clean);
 }
 
@@ -491,7 +368,7 @@ parse_lib_file(char *lib_name, struct Compartment *new_comp)
         lib_fd = open(lib_path, O_RDONLY);
         if (lib_fd == -1)
         {
-            errx(1, "Error opening compartment file  %s!\n", lib_path);
+            errx(1, "Error opening compartment file  %s!\n", lib_name);
         }
     }
 
@@ -507,16 +384,16 @@ parse_lib_file(char *lib_name, struct Compartment *new_comp)
     }
 
     struct LibDependency *new_lib = malloc(sizeof(struct LibDependency));
-    new_lib->lib_name = malloc(strlen(lib_name));
+    new_lib->lib_name = malloc(strlen(lib_name) + 1);
     strcpy(new_lib->lib_name, lib_name);
     if (lib_path)
     {
-        new_lib->lib_path = malloc(strlen(lib_path));
+        new_lib->lib_path = malloc(strlen(lib_path) + 1);
         strcpy(new_lib->lib_path, lib_path);
     }
     else
     {
-        new_lib->lib_path = malloc(strlen(lib_name));
+        new_lib->lib_path = malloc(strlen(lib_name) + 1);
         strcpy(new_lib->lib_path, lib_name);
     }
 
@@ -686,10 +563,12 @@ parse_lib_symtb(Elf64_Shdr *symtb_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
     for (size_t j = 0; j < lib_dep->lib_syms_count; ++j)
     {
         curr_sym = sym_tb[j];
-        if (curr_sym.st_value == 0)
+        // TODO currently ignore symbols of unspecified type
+        if (ELF_ST_TYPE(curr_sym.st_info) == STT_NOTYPE)
         {
             continue;
         }
+
         ld_syms[actual_syms].sym_offset = (void *) curr_sym.st_value;
         char *sym_name = &str_tb[curr_sym.st_name];
         ld_syms[actual_syms].sym_name = malloc(strlen(sym_name) + 1);
@@ -739,50 +618,55 @@ parse_lib_rela(Elf64_Shdr *rela_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
     {
         curr_rela = rela_sec[j];
         size_t curr_rela_sym_idx = ELF64_R_SYM(curr_rela.r_info);
-        Elf64_Sym curr_rela_sym = dyn_sym_tbl[curr_rela_sym_idx];
-        if (curr_rela_sym_idx == 0)
+
+        struct LibRelaMapping lrm = { NULL, 0x0, 0x0, -1, -1 };
+        if (curr_rela_sym_idx != 0)
         {
-            // TODO In some test programs, there are some relocations with no
-            // name and some weird value; we currently filter them out, but
-            // they might mean something in the future
-            continue;
+            Elf64_Sym curr_rela_sym = dyn_sym_tbl[curr_rela_sym_idx];
+
+            // Filter out some `libc` symbols we don't want to handle
+            // TODO at least right now
+            if (!strcmp(&dyn_str_tbl[curr_rela_sym.st_name], "environ"))
+            {
+                warnx("Currently not relocating symbol `environ` from library "
+                      "%s - "
+                      "using within a container might cause a crash.",
+                    lib_dep->lib_name);
+                continue;
+            }
+            else if (!strcmp(&dyn_str_tbl[curr_rela_sym.st_name], "__progname"))
+            {
+                warnx("Currently not relocating symbol `__progname` from "
+                      "library %s "
+                      "- using within a container might cause a crash.",
+                    lib_dep->lib_name);
+                continue;
+            }
+
+            lrm.rela_name
+                = malloc(strlen(&dyn_str_tbl[curr_rela_sym.st_name]) + 1);
+            strcpy(lrm.rela_name, &dyn_str_tbl[curr_rela_sym.st_name]);
+            lrm.rela_sym_type = ELF64_ST_TYPE(curr_rela_sym.st_info);
+            lrm.rela_sym_bind = ELF64_ST_BIND(curr_rela_sym.st_info);
+            if (curr_rela_sym.st_value != 0)
+            {
+                new_relas[actual_relas].target_func_address
+                    = curr_rela_sym.st_value + (char *) lib_dep->lib_mem_base;
+            }
+            // TODO
+            assert(curr_rela.r_addend == 0
+                && "I want to check if we have symbol-related relocations with "
+                   "addends");
+        }
+        else
+        {
+            lrm.target_func_address
+                = curr_rela.r_addend + (char *) lib_dep->lib_mem_base;
         }
 
-        // Filter out some `libc` symbols we don't want to handle
-        // TODO at least right now
-        if (!strcmp(&dyn_str_tbl[curr_rela_sym.st_name], "environ"))
-        {
-            warnx("Currently not relocating symbol `environ` from library %s - "
-                  "using within a container might cause a crash.",
-                lib_dep->lib_name);
-            continue;
-        }
-        else if (!strcmp(&dyn_str_tbl[curr_rela_sym.st_name], "__progname"))
-        {
-            warnx(
-                "Currently not relocating symbol `__progname` from library %s "
-                "- using within a container might cause a crash.",
-                lib_dep->lib_name);
-            continue;
-        }
+        lrm.rela_address = curr_rela.r_offset + (char *) lib_dep->lib_mem_base;
+        memcpy(new_relas + actual_relas, &lrm, sizeof(struct LibRelaMapping));
 
-        char *curr_rela_name
-            = malloc(strlen(&dyn_str_tbl[curr_rela_sym.st_name]) + 1);
-        strcpy(curr_rela_name, &dyn_str_tbl[curr_rela_sym.st_name]);
-        struct LibRelaMapping lrm;
-
-        // TODO haven't handled addends on relocations yet
-        assert(curr_rela.r_addend == 0);
-
-        new_relas[actual_relas] = (struct LibRelaMapping) { curr_rela_name,
-            curr_rela.r_offset + (char *) lib_dep->lib_mem_base, NULL,
-            ELF64_ST_TYPE(curr_rela_sym.st_info),
-            ELF64_ST_BIND(curr_rela_sym.st_info) };
-        if (curr_rela_sym.st_value != 0)
-        {
-            new_relas[actual_relas].target_func_address
-                = curr_rela_sym.st_value + (char *) lib_dep->lib_mem_base;
-        }
         actual_relas += 1;
     }
     lib_dep->rela_maps = realloc(lib_dep->rela_maps,
@@ -819,7 +703,7 @@ parse_lib_dynamic_deps(Elf64_Shdr *dynamic_shdr, Elf64_Ehdr *lib_ehdr,
             lib_dep->lib_dep_names = realloc(lib_dep->lib_dep_names,
                 (lib_dep->lib_dep_count + 1) * sizeof(char *));
             lib_dep->lib_dep_names[lib_dep->lib_dep_count]
-                = malloc(strlen(&dynstr_tbl[dyn_entries[i].d_un.d_val]));
+                = malloc(strlen(&dynstr_tbl[dyn_entries[i].d_un.d_val]) + 1);
             strcpy(lib_dep->lib_dep_names[lib_dep->lib_dep_count],
                 &dynstr_tbl[dyn_entries[i].d_un.d_val]);
             lib_dep->lib_dep_count += 1;
@@ -849,39 +733,6 @@ find_comp_entry_points(
         new_comp->entry_points[new_comp->entry_point_count] = new_entry_point;
         new_comp->entry_point_count += 1;
     }
-}
-
-static void
-find_comp_intercepts(char **intercepts, void **intercept_addrs,
-    size_t intercept_count, struct Compartment *new_comp)
-{
-    // Find symbols for intercepts
-    char **intercept_names = malloc(intercept_count * sizeof(char *));
-    const char *so_plt_suffix = "@plt";
-    for (size_t i = 0; i < intercept_count; ++i)
-    {
-        size_t to_intercept_name_len
-            = strlen(intercepts[i]) + strlen(so_plt_suffix) + 1;
-        intercept_names[i] = malloc(to_intercept_name_len);
-        strcpy(intercept_names[i], intercepts[i]);
-        strcat(intercept_names[i], so_plt_suffix);
-    }
-    for (size_t i = 0; i < intercept_count; ++i)
-    {
-        struct LibSymSearchResult found_sym
-            = find_lib_dep_sym_in_comp(intercept_names[i], new_comp, STT_FUNC);
-        if (found_sym.lib_idx == USHRT_MAX)
-        {
-            continue;
-        }
-
-        // TODO double check
-        comp_add_intercept(new_comp,
-            (uintptr_t) extract_sym_offset(new_comp, found_sym),
-            (uintptr_t) intercept_addrs[i]);
-        free(intercept_names[i]);
-    }
-    free(intercept_names);
 }
 
 static void
@@ -943,14 +794,6 @@ do_pread(int fd, void *buf, size_t count, off_t offset)
     return res;
 }
 
-static void
-get_lib_name(struct LibDependency *lib_dep, const char *lib_path)
-{
-    const char *basename = strrchr(lib_path, '/') + 1;
-    lib_dep->lib_name = malloc(strlen(basename));
-    strcpy(lib_dep->lib_name, basename);
-}
-
 static void *
 extract_sym_offset(struct Compartment *comp, struct LibSymSearchResult res)
 {
@@ -969,7 +812,8 @@ find_lib_dep_sym_in_comp(const char *to_find,
             if (comp_to_search->libs[i]->lib_syms[j].sym_bind != STB_LOCAL
                 && !strcmp(
                     to_find, comp_to_search->libs[i]->lib_syms[j].sym_name)
-                && comp_to_search->libs[i]->lib_syms[j].sym_type == sym_type)
+                && comp_to_search->libs[i]->lib_syms[j].sym_type == sym_type
+                && comp_to_search->libs[i]->lib_syms[j].sym_offset != 0)
             {
                 struct LibSymSearchResult res = { i, j };
                 return res;

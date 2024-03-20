@@ -57,7 +57,7 @@ function(new_comp_test test_name)
     add_library(${test_name} SHARED
         ${test_name}.c)
     set_target_properties(${test_name} PROPERTIES PREFIX "")
-    target_link_libraries(${test_name} PRIVATE chcomp lualib dl m)
+    target_link_libraries(${test_name} PRIVATE chcomp computils lualib dl m)
     target_include_directories(${test_name} PRIVATE ${INCLUDE_DIR} ${LUA_INCLUDE_DIR})
 
     set_property(TARGET ${test_name} PROPERTY compartment TRUE)
@@ -127,14 +127,17 @@ set(comp_binaries
     "simple_call_external"
     "simple_static_var"
     "simple_static_var-external"
+    "simple_global_var"
+    "simple_global_var-external"
     "simple_external"
     "simple_syscall_getpid"
     "simple_syscall_write"
     "simple_va_args"
+    "simple_open_write"
     "simple_fputs"
-    "simple_printf"
     "simple_fopen"
-    #"time"
+    "simple_malloc"
+    "time"
     #"lua_simple"
     #"lua_script"
     "args_simple"
@@ -150,13 +153,15 @@ set(tests
     "simple_call_internal_weak"
     "simple_call_external"
     "simple_static_var"
+    "simple_global_var"
     "simple_syscall_getpid"
     "simple_syscall_write"
     "simple_va_args"
-    #"simple_fputs"
-    #"simple_printf"
+    "simple_open_write"
+    "simple_fputs"
     "simple_fopen"
-    #"time"
+    "simple_malloc"
+    "time"
     #"lua_simple"
     #"lua_script"
     "test_map"
@@ -195,6 +200,9 @@ new_dependency(simple_call_external $<TARGET_FILE:simple_external>)
 
 target_link_libraries(simple_static_var PRIVATE simple_static_var-external)
 new_dependency(simple_static_var $<TARGET_FILE:simple_static_var-external>)
+
+target_link_libraries(simple_global_var PRIVATE simple_global_var-external)
+new_dependency(simple_global_var $<TARGET_FILE:simple_global_var-external>)
 
 #new_dependency(test_map $<TARGET_FILE:simple>)
 
