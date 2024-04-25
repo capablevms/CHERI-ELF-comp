@@ -47,29 +47,11 @@ comp_exec_out();
 extern void
 __clear_cache(void *, void *);
 
-// Number of instructions to inject at intercepted function call point
-// TODO ensure there is sufficient space for these, so we don't spill over
-#define INTERCEPT_INSTR_COUNT 5
-
 // Number of instructions required by the transition function
 #define COMP_TRANS_FN_INSTR_CNT 4
 
 extern void *__capability sealed_redirect_cap;
 extern void *__capability comp_return_caps[2];
-
-/* For a function to be intercepted, information required to insert the
- * redirect code and perform redirection
- *
- * TODO recheck this is properly used, or re-design into a more light-weight
- * approach with pre-given transition capabilities
- */
-struct InterceptPatch
-{
-    int *patch_addr;
-    int32_t instr[INTERCEPT_INSTR_COUNT];
-    uintptr_t comp_manager_cap_addr;
-    void *__capability manager_cap;
-};
 
 // Maximum size of an argument, in bytes
 #define COMP_ARG_SIZE 8
@@ -210,10 +192,6 @@ struct Compartment
 
     // Hardware info - maybe move
     size_t page_size;
-
-    // Misc
-    unsigned short curr_intercept_count;
-    struct InterceptPatch *intercept_patches;
 };
 
 int
@@ -221,9 +199,7 @@ entry_point_cmp(const void *, const void *);
 struct Compartment *
 comp_init();
 struct Compartment *
-comp_from_elf(char *, char **, size_t, char **, void **, size_t, void *);
-void
-comp_add_intercept(struct Compartment *, uintptr_t, uintptr_t);
+comp_from_elf(char *, char **, size_t, void *);
 void
 comp_map(struct Compartment *);
 void

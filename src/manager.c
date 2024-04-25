@@ -69,24 +69,15 @@ register_new_comp(char *filename, bool allow_default_entry)
         strcpy(ep_names[i], new_cep[i].name);
     }
 
-    char **intercept_names = calloc(INTERCEPT_FUNC_COUNT, sizeof(char *));
-    void **intercept_addrs = calloc(INTERCEPT_FUNC_COUNT, sizeof(uintptr_t));
-    for (size_t i = 0; i < INTERCEPT_FUNC_COUNT; ++i)
-    {
-        intercept_names[i] = malloc(strlen(comp_intercept_funcs[i].func_name));
-        strcpy(intercept_names[i], comp_intercept_funcs[i].func_name);
-        intercept_addrs[i] = comp_intercept_funcs[i].redirect_func;
-    }
-
-    struct Compartment *new_comp
-        = comp_from_elf(filename, ep_names, new_comp_ep_count, intercept_names,
-            intercept_addrs, INTERCEPT_FUNC_COUNT, get_next_comp_addr());
+    struct Compartment *new_comp = comp_from_elf(
+        filename, ep_names, new_comp_ep_count, get_next_comp_addr());
     new_comp->id = comps_count;
     void *__capability new_comp_ddc
         = cheri_address_set(cheri_ddc_get(), (uintptr_t) new_comp->base);
-    // TODO double check second parameter of `cheri_bounds_set`
-    new_comp_ddc = cheri_bounds_set(
-        new_comp_ddc, (uintptr_t) new_comp->scratch_mem_stack_top);
+    new_comp_ddc = cheri_bounds_set(new_comp_ddc,
+        (char *) new_comp->scratch_mem_stack_top - (char *) new_comp->base);
+    new_comp_ddc = cheri_offset_set(new_comp_ddc,
+        (char *) new_comp->scratch_mem_base - (char *) new_comp->base);
     new_comp->ddc = new_comp_ddc;
 
     struct CompWithEntries *new_cwe = malloc(sizeof(struct CompWithEntries));
@@ -105,12 +96,6 @@ register_new_comp(char *filename, bool allow_default_entry)
         free(ep_names[i]);
     }
     free(ep_names);
-    for (size_t i = 0; i < INTERCEPT_FUNC_COUNT; ++i)
-    {
-        free(intercept_names[i]);
-    }
-    free(intercept_names);
-    free(intercept_addrs);
 
     return new_comp;
 }

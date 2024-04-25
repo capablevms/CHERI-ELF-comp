@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -12,7 +13,7 @@ do_print(const char *const to_print)
 int
 main(void)
 {
-    char *x = malloc(strlen(hw));
+    char *x = malloc(strlen(hw) + 1);
     strcpy(x, hw);
     do_print(x);
     free(x);

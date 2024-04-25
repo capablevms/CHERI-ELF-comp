@@ -83,6 +83,4 @@ clean_compartment_config(struct CompEntryPointDef *, size_t);
  * Memory allocation
  ******************************************************************************/
 
-#include "mem_mng.h"
-
 #endif // _MANAGER_H

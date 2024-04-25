@@ -2,37 +2,50 @@
 #include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 
 void
 by_fopen()
 {
     FILE *fd = fopen("tmp", "w");
-    fprintf(fd, "Hi\n");
+    if (!fd)
+    {
+        err(1, "Error in fopen: ");
+    }
     fclose(fd);
 }
 
 void
 by_syscall()
 {
+    int fd = syscall(SYS_open, "tmp", O_CREAT); // open
+    if (fd == -1)
+    {
+        err(1, "Error in open: ");
+    }
+    syscall(SYS_close, fd); // close
 }
 
 void
 by_open()
 {
-    int fd = open("tmp", O_WRONLY | O_CREAT);
+    int fd = open("tmp", O_CREAT);
     if (fd == -1)
     {
         err(1, "Error in open: ");
     }
-    char *buf = "Hi\n";
-    write(fd, buf, strlen(buf));
     close(fd);
 }
 
 int
 main()
 {
+    write(STDOUT_FILENO, "== By open\n", 11);
     by_open();
+    write(STDOUT_FILENO, "== By syscall\n", 14);
+    by_syscall();
+    write(STDOUT_FILENO, "== By fopen\n", 12);
+    by_fopen();
     return 0;
 }

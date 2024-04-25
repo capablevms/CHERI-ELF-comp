@@ -11,8 +11,6 @@
 
 #include "cheriintrin.h"
 
-#include "mem_mng.h"
-
 // Forward declarations
 struct Compartment;
 extern struct Compartment *loaded_comp;
@@ -21,6 +19,8 @@ exec_comp(struct Compartment *, char *, char **);
 struct Compartment *manager_get_compartment_by_id(size_t);
 
 extern void *__capability manager_ddc;
+extern void
+comp_exec_out();
 
 // Number of capabilities required to perform a transition
 #define COMP_RETURN_CAPS_COUNT 2
@@ -55,43 +55,7 @@ intercept_wrapper();
 void
 setup_intercepts();
 
-time_t
-intercepted_time(time_t *);
-FILE *
-intercepted_fopen(const char *, const char *);
-size_t
-intercepted_fread(void *__restrict, size_t, size_t, FILE *__restrict);
-size_t
-intercepted_fwrite(void *__restrict, size_t, size_t, FILE *__restrict);
-int
-intercepted_fclose(FILE *);
-int
-intercepted_getc(FILE *);
-int
-intercepted_fputc(int, FILE *);
-int
-intercepted___srget(FILE *);
-
-void *
-my_realloc(void *, size_t);
-void *my_malloc(size_t);
-void
-my_free(void *);
-int
-my_fprintf(FILE *, const char *, ...);
-
 size_t
 my_call_comp(size_t, char *, void *);
-static const struct FuncIntercept to_intercept_funcs[] = {
-    /* Mem funcs */
-    { "malloc", (void *) my_malloc, NULL },
-    { "realloc", (void *) my_realloc, NULL },
-    { "free", (void *) my_free, NULL },
-};
-//
-// Functions to be intercepted and associated data
-#define INTERCEPT_FUNC_COUNT                                                   \
-    sizeof(to_intercept_funcs) / sizeof(to_intercept_funcs[0])
-extern struct FuncIntercept comp_intercept_funcs[INTERCEPT_FUNC_COUNT];
 
 #endif // _INTERCEPT_H
