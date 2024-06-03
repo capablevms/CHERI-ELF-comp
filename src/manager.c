@@ -31,7 +31,7 @@ get_comp_with_entries(struct Compartment *);
  * Utility functions
  ******************************************************************************/
 
-void
+static void
 print_full_cap(uintcap_t cap)
 {
     uint32_t words[4]; // Hack to demonstrate! In real code, be more careful
@@ -43,6 +43,26 @@ print_full_cap(uintcap_t cap)
         printf("_%08x", words[i]);
     }
     printf("\n");
+}
+
+static void
+pp_cap(void *__capability ptr)
+{
+    uint64_t length = cheri_length_get(ptr);
+    uint64_t address = cheri_address_get(ptr);
+    uint64_t base = cheri_base_get(ptr);
+    uint64_t flags = cheri_flags_get(ptr);
+    uint64_t perms = cheri_perms_get(ptr);
+    uint64_t type = cheri_type_get(ptr);
+    bool tag = cheri_tag_get(ptr);
+
+    uint64_t offset = cheri_offset_get(ptr);
+
+    printf("Capability: %#lp\n", ptr);
+    printf("Tag: %d, Perms: %04lx, Type: %lx, Address: %04lx, Base: %04lx, "
+           "End: %04lx, Flags: %lx, "
+           "Length: %04lx, Offset: %04lx\n",
+        tag, perms, type, address, base, base + length, flags, length, offset);
 }
 
 void *
@@ -73,9 +93,9 @@ register_new_comp(char *filename, bool allow_default_entry)
         filename, ep_names, new_comp_ep_count, get_next_comp_addr());
     new_comp->id = comps_count;
     void *__capability new_comp_ddc
-        = cheri_address_set(cheri_ddc_get(), (uintptr_t) new_comp->base);
-    new_comp_ddc = cheri_bounds_set(new_comp_ddc,
-        (char *) new_comp->scratch_mem_stack_top - (char *) new_comp->base);
+        = cheri_address_set(cheri_ddc_get(), (intptr_t) new_comp->base);
+    new_comp_ddc = cheri_bounds_set(
+        new_comp_ddc, (char *) new_comp->mem_top - (char *) new_comp->base);
     new_comp_ddc = cheri_offset_set(new_comp_ddc,
         (char *) new_comp->scratch_mem_base - (char *) new_comp->base);
     new_comp->ddc = new_comp_ddc;
