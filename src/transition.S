@@ -20,22 +20,10 @@ intercept_wrapper:
     ldp c28, c29, [sp], #64
     ret
 
-/* Function to transition out of a compartment; essentially the `ldpblr`
- * transition instruction, and some book-keeping.
- */
-.global compartment_transition_out
-.type compartment_transition_out, "function"
-compartment_transition_out:
-    // TODO
-    stp c29, clr, [sp, #-32]!
-    ldpblr c29, [c11]
-    ldp c29, clr, [sp], #32
-    ret
-compartment_transition_out_end:
-
 /* comp_exec_in(void* comp_sp, void* __capability comp_ddc, void* fn,
                 void* args, size_t args_count,
-                void* __capability sealed_redirect_cap) */
+                void* __capability sealed_redirect_cap,
+                void* comp_tls_region_start) */
 /* Instructions to enter a compartment. There is no `ret`, as we need to
  * perform a context switch upon exiting, which is done via `ldpbr`
  */
@@ -56,8 +44,11 @@ comp_exec_in:
        `SP + 1 * 8`   > |  callee-saved  x19  |
        `    new SP`   >  ---------------------
     */
+
+    mrs x20, TPIDR_EL0
+
     stp x19, lr, [sp, #-32]!
-    str x29, [sp, #16]
+    stp x29, x20, [sp, #16]
     mov x19, sp
 
     // Move arguments to temporary registers (we'll need them later)
@@ -95,7 +86,12 @@ loaded_params:
     mov x5, xzr
 
     // Transition into new compartment
+    // Set `TPIDR_EL0` register to base of compartment for `thread_local`
+    // variables (`to_exec->libs_tls_sects->region_start`)
     mov sp, x9
+    msr TPIDR_EL0, x6
+    mov x6, xzr
+
     msr DDC, c10
     // We are now fully in the new context
 
@@ -123,5 +119,6 @@ comp_exec_out:
     msr DDC, c29
     mov sp, x19
     ldp x19, lr, [sp], #32
-    ldr x29, [sp, #-16]
+    ldp x29, x20, [sp, #-16]
+    msr TPIDR_EL0, x20
     ret

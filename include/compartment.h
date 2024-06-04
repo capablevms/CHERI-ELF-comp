@@ -34,11 +34,9 @@
 // currently there's quite a bit of redundancy to make things easier to think
 // about
 
-void
-compartment_transition_out();
 int64_t
-comp_exec_in(
-    void *, void *__capability, void *, void *, size_t, void *__capability);
+comp_exec_in(void *, void *__capability, void *, void *, size_t,
+    void *__capability, void *);
 void
 comp_exec_out();
 
@@ -48,8 +46,6 @@ extern void
 __clear_cache(void *, void *);
 
 // Number of instructions required by the transition function
-#define COMP_TRANS_FN_INSTR_CNT 4
-
 extern void *__capability sealed_redirect_cap;
 extern void *__capability comp_return_caps[2];
 
@@ -145,6 +141,26 @@ struct LibDependency
     // Symbols within this library that need eager relocation
     size_t rela_maps_count;
     struct LibRelaMapping *rela_maps;
+
+    // TLS-related variables
+    // TODO can there be more TLS sections?
+    void *tls_sec_addr;
+    size_t tls_sec_size;
+    size_t tls_data_size;
+};
+
+/**
+ * Struct representing TLS information for a compartment. Since we currently
+ * enforce only single-threaded code, we basically only have pointers for
+ * regions allocated for TLS for each dynamic shared object
+ */
+struct TLSDesc
+{
+    unsigned short region_count;
+    size_t region_size;
+    void *region_start;
+    unsigned short libs_count;
+    unsigned short *lib_idxs;
 };
 
 /**
@@ -166,29 +182,18 @@ struct Compartment
     // Scratch memory
     void *scratch_mem_base;
     size_t scratch_mem_size;
-    size_t scratch_mem_alloc;
 
     size_t scratch_mem_heap_size;
     void *scratch_mem_stack_top;
     size_t scratch_mem_stack_size;
-    void *stack_pointer;
-    struct MemAlloc *alloc_head;
-
-    // TODO double check / rework this process
-    void *manager_caps;
-    size_t max_manager_caps_count;
-    size_t active_manager_caps_count;
-
-    // Transition function (duplicated across compartments, but must be within
-    // to be within DDC bounds)
-    void *mng_trans_fn;
-    size_t mng_trans_fn_sz;
 
     // Internal libraries and relocations
     size_t libs_count;
     struct LibDependency **libs;
     size_t entry_point_count;
     struct CompEntryPoint *entry_points;
+    void *tls_lookup_func;
+    struct TLSDesc *libs_tls_sects;
 
     // Hardware info - maybe move
     size_t page_size;

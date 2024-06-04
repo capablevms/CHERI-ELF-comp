@@ -120,26 +120,31 @@ set(func_binaries
 
 set(comp_binaries
     "simple"
-    "simple_libc"
+    "simple_call_external"
     "simple_call_internal"
     "simple_call_internal_static"
     "simple_call_internal_weak"
-    "simple_call_external"
-    "simple_static_var"
-    "simple_static_var-external"
+    "simple_external"
+    "simple_fopen"
+    "simple_fputs"
     "simple_global_var"
     "simple_global_var-external"
-    "simple_external"
+    "simple_libc"
+    "simple_malloc"
+    "simple_open_write"
+    "simple_printf"
+    "simple_static_var"
+    "simple_static_var-external"
     "simple_syscall_getpid"
     "simple_syscall_write"
+    "simple_thrloc_var"
+    "simple_thrloc_var-external"
+    "simple_time"
     "simple_va_args"
-    "simple_open_write"
-    "simple_fputs"
-    "simple_fopen"
-    "simple_malloc"
-    "time"
+
     #"lua_simple"
     #"lua_script"
+
     "args_simple"
     #"test_two_comps-comp1"
     #"test_two_comps-comp2 0x2000000"
@@ -147,27 +152,31 @@ set(comp_binaries
 
 set(tests
     "simple"
-    "simple_libc"
+    "simple_call_external"
     "simple_call_internal"
     "simple_call_internal_static"
     "simple_call_internal_weak"
-    "simple_call_external"
-    "simple_static_var"
+    "simple_fopen"
+    "simple_fputs"
     "simple_global_var"
+    "simple_libc"
+    "simple_malloc"
+    "simple_open_write"
+    "simple_static_var"
     "simple_syscall_getpid"
     "simple_syscall_write"
+    "simple_thrloc_var"
+    "simple_time"
     "simple_va_args"
-    "simple_open_write"
-    "simple_fputs"
-    "simple_fopen"
-    "simple_malloc"
-    "time"
+
     #"lua_simple"
     #"lua_script"
+
     "test_map"
     #"test_args_near_unmapped"
     #"test_two_comps"
     #"test_two_comps_inter_call"
+
     "args-simple args_simple check_simple 40 2"
     "args-more args_simple check_simple 40 2 2 2" # Check additional arguments are ignored
     "args-combined args_simple check_combined 400 2 20"
@@ -203,6 +212,9 @@ new_dependency(simple_static_var $<TARGET_FILE:simple_static_var-external>)
 
 target_link_libraries(simple_global_var PRIVATE simple_global_var-external)
 new_dependency(simple_global_var $<TARGET_FILE:simple_global_var-external>)
+
+target_link_libraries(simple_thrloc_var PRIVATE simple_thrloc_var-external)
+new_dependency(simple_thrloc_var $<TARGET_FILE:simple_thrloc_var-external>)
 
 #new_dependency(test_map $<TARGET_FILE:simple>)
 
