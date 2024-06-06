@@ -664,7 +664,7 @@ parse_lib_rela(Elf64_Shdr *rela_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
     // Prepare TLS look-up function relocation (will be copied for each TLS
     // relocation entry
     static struct LibRelaMapping tls_lrm
-        = { NULL, 0x0, 0x0, STT_FUNC, STB_GLOBAL };
+        = { NULL, 0x0, 0x0, -1, STT_FUNC, STB_GLOBAL };
 
     // Log symbols that will need to be relocated eagerly at maptime
     Elf64_Rela curr_rela;
@@ -675,7 +675,7 @@ parse_lib_rela(Elf64_Shdr *rela_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
         size_t curr_rela_sym_idx = ELF64_R_SYM(curr_rela.r_info);
         size_t curr_rela_type = ELF64_R_TYPE(curr_rela.r_info);
 
-        struct LibRelaMapping lrm = { NULL, 0x0, 0x0, -1, -1 };
+        struct LibRelaMapping lrm = { NULL, 0x0, 0x0, curr_rela_type, -1, -1 };
 
         // XXX We handle `TLS` symbols differently. It seems the way
         // AARCH64 handles TLS variables is preferentially via
@@ -736,11 +736,12 @@ parse_lib_rela(Elf64_Shdr *rela_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
             // function relocation
             lrm.rela_address = curr_rela.r_offset
                 + (char *) lib_dep->lib_mem_base + sizeof(void *);
-            memcpy(
-                new_relas + actual_relas, &lrm, sizeof(struct LibRelaMapping));
-
-            actual_relas += 1;
-            continue;
+        }
+        else if (curr_rela_type == R_AARCH64_TLS_TPREL64)
+        {
+            lrm.target_func_address = (char *) curr_rela.r_addend;
+            lrm.rela_address
+                = curr_rela.r_offset + (char *) lib_dep->lib_mem_base;
         }
         else
         {
@@ -796,13 +797,9 @@ parse_lib_rela(Elf64_Shdr *rela_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
             }
             lrm.rela_address
                 = curr_rela.r_offset + (char *) lib_dep->lib_mem_base;
-            memcpy(
-                new_relas + actual_relas, &lrm, sizeof(struct LibRelaMapping));
-
-            actual_relas += 1;
-            continue;
         }
-        errx(1, "Unhandled relocation\n");
+        memcpy(new_relas + actual_relas, &lrm, sizeof(struct LibRelaMapping));
+        actual_relas += 1;
     }
     lib_dep->rela_maps = realloc(lib_dep->rela_maps,
         (lib_dep->rela_maps_count + actual_relas)
@@ -890,12 +887,14 @@ resolve_rela_syms(struct Compartment *new_comp)
                 continue;
             }
 
-            if (curr_rela_map->target_func_address != 0)
+            if (curr_rela_map->target_func_address != 0
+                || curr_rela_map->rela_type == R_AARCH64_TLS_TPREL64)
             {
                 continue;
             }
 
-            if (!strcmp(curr_rela_map->rela_name, tls_rtld_dropin))
+            if (curr_rela_map->rela_name
+                && !strcmp(curr_rela_map->rela_name, tls_rtld_dropin))
             {
                 curr_rela_map->target_func_address = new_comp->tls_lookup_func;
                 continue;
@@ -961,6 +960,12 @@ find_lib_dep_sym_in_comp(const char *to_find,
     {
         for (size_t j = 0; j < comp_to_search->libs[i]->lib_syms_count; ++j)
         {
+            // Ignore non-symbol relocations
+            if (!comp_to_search->libs[i]->lib_syms[j].sym_name)
+            {
+                continue;
+            }
+
             // TODO eyeball performance of this approach versus using `&&`
             // Ignore `LOCAL` bind symbols - they cannot be relocated against
             bool cond

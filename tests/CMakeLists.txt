@@ -162,6 +162,7 @@ set(tests
     "simple_libc"
     "simple_malloc"
     "simple_open_write"
+    "simple_printf"
     "simple_static_var"
     "simple_syscall_getpid"
     "simple_syscall_write"
