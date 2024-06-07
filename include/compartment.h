@@ -92,6 +92,7 @@ struct LibRelaMapping
     char *rela_name;
     void *rela_address; // address of relocation in compartment
     void *target_func_address; // address of actual function
+    unsigned short rela_type; // type of relocation
     unsigned short rela_sym_type; // type of underlying symbol
     unsigned short rela_sym_bind; // bind of underlying symbol
 };
