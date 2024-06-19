@@ -3,7 +3,7 @@
 static void *malloc_ptr;
 static size_t heap_mem_left;
 
-#define NON_COMP_DEFAULT_SIZE (10 * 1024) // 10 MB
+#define NON_COMP_DEFAULT_SIZE (1024 * 1024) // 1 GB
 
 void *
 malloc(size_t to_alloc)
@@ -57,10 +57,15 @@ calloc(size_t elem_count, size_t elem_size)
 void *
 realloc(void *to_realloc, size_t new_size)
 {
-    // TODO temp usage for bump allocator implementation to satisfy compiler
-    to_realloc = to_realloc;
-
-    return malloc(new_size);
+    if (!to_realloc)
+    {
+        return malloc(new_size);
+    }
+    void *new_alloc = malloc(new_size);
+    size_t to_copy_size = new_size; // TODO
+    memcpy(new_alloc, to_realloc, to_copy_size);
+    free(to_realloc);
+    return new_alloc;
 }
 
 void
