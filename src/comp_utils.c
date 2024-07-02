@@ -68,6 +68,12 @@ realloc(void *to_realloc, size_t new_size)
     return new_alloc;
 }
 
+void *
+reallocarray(void *to_realloc, size_t elem_count, size_t elem_size)
+{
+    return realloc(to_realloc, elem_count * elem_size);
+}
+
 void
 tls_lookup_stub()
 {

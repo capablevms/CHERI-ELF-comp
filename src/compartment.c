@@ -4,6 +4,10 @@ const char *libs_path_env_var = "COMP_LIBRARY_PATH";
 const char *tls_rtld_dropin = "tls_lookup_stub";
 const char *comp_utils_soname = "libcomputils.so";
 
+extern char **proc_env_ptr;
+extern const size_t max_env_sz;
+extern const unsigned short max_env_count;
+
 /*******************************************************************************
  * Forward declarations
  ******************************************************************************/
@@ -33,6 +37,10 @@ static char *
 find_in_dir(const char *, char *);
 static void
 init_comp_scratch_mem(struct Compartment *);
+static void
+adjust_comp_scratch_mem(struct Compartment *, size_t);
+static void
+setup_environ(struct Compartment *);
 static void
 resolve_comp_tls_regions(struct Compartment *);
 
@@ -157,6 +165,7 @@ comp_from_elf(char *filename, char **entry_points, size_t entry_point_count,
     assert(entry_point_count > 0);
 
     init_comp_scratch_mem(new_comp);
+    setup_environ(new_comp);
     find_comp_entry_points(entry_points, entry_point_count, new_comp);
     resolve_rela_syms(new_comp);
     resolve_comp_tls_regions(new_comp);
@@ -221,6 +230,27 @@ comp_map(struct Compartment *to_map)
     if (map_result == MAP_FAILED)
     {
         err(1, "Error mapping compartment %zu scratch memory", to_map->id);
+    }
+
+    /* Copy over environ variables
+    //
+    // We need a pointer to an array of string pointers, so we synthetically
+    // create one. We don't expect this pointer to move, as the maximum allowed
+    // size for the `environ` array is already allocated
+    */
+    *to_map->environ_ptr = (char *) (to_map->environ_ptr + 1);
+    to_map->environ_ptr += 1;
+
+    // Copy over prepared `environ` data from manager
+    memcpy(to_map->environ_ptr, proc_env_ptr, max_env_sz);
+    for (unsigned short i = 0; i < max_env_count; ++i)
+    {
+        if (*(to_map->environ_ptr + i) == 0x0)
+        {
+            break;
+        }
+        // Update entry offsets relative to compartment address
+        *(to_map->environ_ptr + i) += (uintptr_t) to_map->environ_ptr;
     }
 
     size_t tls_allocd = 0x0;
@@ -758,17 +788,7 @@ parse_lib_rela(Elf64_Shdr *rela_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
 
                 // Filter out some `libc` symbols we don't want to handle
                 // TODO at least right now
-                if (!strcmp(&dyn_str_tbl[curr_rela_sym.st_name], "environ"))
-                {
-                    warnx("Currently not relocating symbol `environ` from "
-                          "library "
-                          "%s - "
-                          "using within a container might cause a crash.",
-                        lib_dep->lib_name);
-                    continue;
-                }
-                else if (!strcmp(
-                             &dyn_str_tbl[curr_rela_sym.st_name], "__progname"))
+                if (!strcmp(&dyn_str_tbl[curr_rela_sym.st_name], "__progname"))
                 {
                     warnx("Currently not relocating symbol `__progname` from "
                           "library %s "
@@ -897,6 +917,13 @@ resolve_rela_syms(struct Compartment *new_comp)
                 && !strcmp(curr_rela_map->rela_name, tls_rtld_dropin))
             {
                 curr_rela_map->target_func_address = new_comp->tls_lookup_func;
+                continue;
+            }
+
+            if (curr_rela_map->rela_name
+                && !strcmp(curr_rela_map->rela_name, "environ"))
+            {
+                curr_rela_map->target_func_address = new_comp->environ_ptr;
                 continue;
             }
 
@@ -1062,6 +1089,23 @@ init_comp_scratch_mem(struct Compartment *new_comp)
 }
 
 static void
+adjust_comp_scratch_mem(struct Compartment *new_comp, size_t to_adjust)
+{
+    new_comp->scratch_mem_size += to_adjust;
+    new_comp->mem_top = (char *) new_comp->mem_top + to_adjust;
+}
+
+static void
+setup_environ(struct Compartment *new_comp)
+{
+    assert(proc_env_ptr != NULL); // TODO consider optional check
+    new_comp->environ_sz
+        = align_up(max_env_sz, new_comp->page_size) + new_comp->page_size;
+    new_comp->environ_ptr = new_comp->mem_top;
+    adjust_comp_scratch_mem(new_comp, new_comp->environ_sz);
+}
+
+static void
 resolve_comp_tls_regions(struct Compartment *new_comp)
 {
     if (!new_comp->libs_tls_sects)
@@ -1072,7 +1116,7 @@ resolve_comp_tls_regions(struct Compartment *new_comp)
 
     // TODO currently we only support one thread
     new_comp->libs_tls_sects->region_count = 1;
-    new_comp->libs_tls_sects->region_start = new_comp->scratch_mem_stack_top;
+    new_comp->libs_tls_sects->region_start = new_comp->mem_top;
     new_comp->libs_tls_sects->libs_count = 0;
 
     unsigned short *lib_idxs
@@ -1098,8 +1142,7 @@ resolve_comp_tls_regions(struct Compartment *new_comp)
 
     intptr_t total_tls_size
         = comp_tls_size * new_comp->libs_tls_sects->region_count;
-    new_comp->scratch_mem_size += total_tls_size;
-    new_comp->mem_top = (char *) new_comp->mem_top + total_tls_size;
+    adjust_comp_scratch_mem(new_comp, total_tls_size);
     new_comp->libs_tls_sects->region_size = comp_tls_size;
 
     assert((uintptr_t) new_comp->libs_tls_sects->region_start % 16 == 0);

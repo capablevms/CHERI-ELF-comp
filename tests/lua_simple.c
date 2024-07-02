@@ -15,5 +15,5 @@ main(void)
     lua_Integer len = luaL_len(L, 1);
 
     lua_close(L);
-    return (len == strlen(test_string) ? 0 : 1);
+    return ((unsigned long) len == strlen(test_string) ? 0 : 1);
 }

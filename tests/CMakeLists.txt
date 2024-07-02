@@ -124,6 +124,7 @@ set(comp_binaries
     "simple_call_internal"
     "simple_call_internal_static"
     "simple_call_internal_weak"
+    "simple_environ"
     "simple_external"
     "simple_fopen"
     "simple_fputs"
@@ -142,8 +143,8 @@ set(comp_binaries
     "simple_time"
     "simple_va_args"
 
-    #"lua_simple"
-    #"lua_script"
+    "lua_simple"
+    "lua_script"
 
     "args_simple"
     #"test_two_comps-comp1"
@@ -156,6 +157,7 @@ set(tests
     "simple_call_internal"
     "simple_call_internal_static"
     "simple_call_internal_weak"
+    "simple_environ"
     "simple_fopen"
     "simple_fputs"
     "simple_global_var"
@@ -170,8 +172,8 @@ set(tests
     "simple_time"
     "simple_va_args"
 
-    #"lua_simple"
-    #"lua_script"
+    "lua_simple"
+    "lua_script"
 
     "test_map"
     #"test_args_near_unmapped"
@@ -217,9 +219,9 @@ new_dependency(simple_global_var $<TARGET_FILE:simple_global_var-external>)
 target_link_libraries(simple_thrloc_var PRIVATE simple_thrloc_var-external)
 new_dependency(simple_thrloc_var $<TARGET_FILE:simple_thrloc_var-external>)
 
-#new_dependency(test_map $<TARGET_FILE:simple>)
+new_dependency(test_map $<TARGET_FILE:simple>)
 
-#new_dependency(lua_script ${CMAKE_CURRENT_SOURCE_DIR}/hello_world.lua)
+new_dependency(lua_script ${CMAKE_CURRENT_SOURCE_DIR}/hello_world.lua)
 #new_dependency(test_args_near_unmapped $<TARGET_FILE:args_simple>)
 #new_dependency(test_args_near_unmapped ${CMAKE_CURRENT_SOURCE_DIR}/args_simple.comp)
 

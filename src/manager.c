@@ -15,12 +15,21 @@ void *__capability manager_ddc = 0;
 
 const char *comp_config_suffix = ".comp";
 
+char **proc_env_ptr = NULL;
+const unsigned short avg_sz_per_env_entry = 128; // TODO
+const unsigned short max_env_count = 128; // TODO
+const size_t max_env_sz
+    = max_env_count * sizeof(char *) + avg_sz_per_env_entry * max_env_count;
+extern char **environ;
+
 static struct CompEntryPointDef *
 parse_compartment_config(char *, size_t *, bool);
 static struct CompEntryPointDef *
 make_default_entry_point();
 static struct CompEntryPointDef
 get_entry_point(char *, struct CompEntryPointDef *, size_t);
+static void
+prepare_compartment_environ();
 static void *
 prepare_compartment_args(char **args, struct CompEntryPointDef);
 
@@ -78,6 +87,11 @@ get_next_comp_addr(void)
 struct Compartment *
 register_new_comp(char *filename, bool allow_default_entry)
 {
+    if (!proc_env_ptr)
+    {
+        prepare_compartment_environ();
+    }
+
     size_t new_comp_ep_count;
     struct CompEntryPointDef *new_cep = parse_compartment_config(
         filename, &new_comp_ep_count, allow_default_entry);
@@ -145,6 +159,9 @@ clean_all_comps()
         clean_comp(comps[i]->comp);
     }
     free(comps);
+
+    free(proc_env_ptr);
+    proc_env_ptr = NULL;
 }
 
 void
@@ -322,6 +339,28 @@ get_entry_point(
         cep_count -= 1;
     }
     errx(1, "Did not find entry point for function %s!\n", entry_point_fn);
+}
+
+static void
+prepare_compartment_environ()
+{
+    proc_env_ptr = malloc(max_env_sz);
+    memset(proc_env_ptr, 0, max_env_sz);
+    char **prov_env_vals = proc_env_ptr + max_env_count * sizeof(char *);
+
+    size_t envs_parsed = 0;
+    size_t envs_parsed_sz = 0;
+    const uintptr_t vals_offset = max_env_count * sizeof(char *);
+    for (char **curr_env = environ; *curr_env; curr_env++)
+    {
+        // We only save offsets for the pointers, since they'll be relocated
+        // relative to the compartment base address
+        proc_env_ptr[envs_parsed] = (char *) (vals_offset + envs_parsed_sz);
+        strcpy((char *) proc_env_ptr + vals_offset + envs_parsed_sz, *curr_env);
+
+        envs_parsed += 1;
+        envs_parsed_sz += strlen(*curr_env) + 1;
+    }
 }
 
 static void *
