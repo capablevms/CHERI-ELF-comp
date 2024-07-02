@@ -42,7 +42,7 @@ do_script()
 }
 
 int
-main(int argc, char **argv)
+main()
 {
     do_script_arg("./hello_world.lua");
     return 0;

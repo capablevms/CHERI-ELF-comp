@@ -180,6 +180,10 @@ struct Compartment
     void *mem_top;
     bool mapped;
 
+    // Environ
+    char **environ_ptr;
+    size_t environ_sz;
+
     // Scratch memory
     void *scratch_mem_base;
     size_t scratch_mem_size;
