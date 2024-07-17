@@ -124,6 +124,7 @@ set(comp_binaries
     "simple_call_internal"
     "simple_call_internal_static"
     "simple_call_internal_weak"
+    "simple_const_thrloc_var"
     "simple_environ"
     "simple_external"
     "simple_fopen"
@@ -141,10 +142,15 @@ set(comp_binaries
     "simple_thrloc_var"
     "simple_thrloc_var-external"
     "simple_time"
+    "simple_toupper"
     "simple_va_args"
+    "tls_check"
+    "tls_check-external1"
+    "tls_check-external2"
 
     "lua_simple"
     "lua_script"
+    "lua_suite_some"
 
     "args_simple"
     #"test_two_comps-comp1"
@@ -157,6 +163,7 @@ set(tests
     "simple_call_internal"
     "simple_call_internal_static"
     "simple_call_internal_weak"
+    "simple_const_thrloc_var"
     "simple_environ"
     "simple_fopen"
     "simple_fputs"
@@ -170,10 +177,13 @@ set(tests
     "simple_syscall_write"
     "simple_thrloc_var"
     "simple_time"
+    #"simple_toupper"
     "simple_va_args"
+    "tls_check"
 
     "lua_simple"
     "lua_script"
+    #"lua_suite_some"
 
     "test_map"
     #"test_args_near_unmapped"
@@ -218,6 +228,10 @@ new_dependency(simple_global_var $<TARGET_FILE:simple_global_var-external>)
 
 target_link_libraries(simple_thrloc_var PRIVATE simple_thrloc_var-external)
 new_dependency(simple_thrloc_var $<TARGET_FILE:simple_thrloc_var-external>)
+
+target_link_libraries(tls_check PRIVATE tls_check-external1 tls_check-external2)
+new_dependency(tls_check $<TARGET_FILE:tls_check-external1>)
+new_dependency(tls_check $<TARGET_FILE:tls_check-external2>)
 
 new_dependency(test_map $<TARGET_FILE:simple>)
 

@@ -95,6 +95,7 @@ struct LibRelaMapping
     unsigned short rela_type; // type of relocation
     unsigned short rela_sym_type; // type of underlying symbol
     unsigned short rela_sym_bind; // bind of underlying symbol
+    uint16_t rela_sym_shndx; // section index of underlying symbol
 };
 
 /* Struct representing a symbol entry of a dependency library
@@ -115,6 +116,7 @@ struct LibSymSearchResult
 {
     unsigned short lib_idx;
     unsigned short sym_idx;
+    bool found;
 };
 
 /**
@@ -148,6 +150,9 @@ struct LibDependency
     void *tls_sec_addr;
     size_t tls_sec_size;
     size_t tls_data_size;
+    // offset from TLS base pointer (i.e., value of `tpidr_el0`) where this
+    // library's TLS variables start
+    size_t tls_offset;
 };
 
 /**
@@ -161,7 +166,6 @@ struct TLSDesc
     size_t region_size;
     void *region_start;
     unsigned short libs_count;
-    unsigned short *lib_idxs;
 };
 
 /**
