@@ -106,6 +106,7 @@ struct LibDependencySymbol
     void *sym_offset;
     unsigned short sym_type;
     unsigned short sym_bind;
+    uint16_t sym_shndx;
 };
 
 /* Struct representing the result of searching for a library symbol in a

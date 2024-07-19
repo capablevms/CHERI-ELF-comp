@@ -657,6 +657,7 @@ parse_lib_symtb(Elf64_Shdr *symtb_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
         strcpy(ld_syms[actual_syms].sym_name, sym_name);
         ld_syms[actual_syms].sym_type = ELF64_ST_TYPE(curr_sym.st_info);
         ld_syms[actual_syms].sym_bind = ELF64_ST_BIND(curr_sym.st_info);
+        ld_syms[actual_syms].sym_shndx = curr_sym.st_shndx;
         actual_syms += 1;
     }
     ld_syms
@@ -1080,17 +1081,14 @@ find_lib_dep_sym_in_lib(const char *to_find, struct Compartment *comp_to_search,
         // Ignore `LOCAL` bind symbols - they cannot be relocated against
         bool cond = curr_sym.sym_bind != STB_LOCAL;
 
+        // Check symbol is indeed local, not another external reference
+        cond = cond && curr_sym.sym_shndx != 0;
+
         // Check symbol name matches
         cond = cond && !strcmp(to_find, curr_sym.sym_name);
 
         // Check symbol type matches
         cond = cond && curr_sym.sym_type == sym_type;
-
-        // Symbols cannot have 0-offset values (except if they are a TLS symbol)
-        if (sym_type != STT_TLS)
-        {
-            cond = cond && curr_sym.sym_offset != 0;
-        }
 
         // If all conditions pass, we found a valid symbol to relocate against
         if (cond)
