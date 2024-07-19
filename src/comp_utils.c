@@ -3,7 +3,7 @@
 static void *malloc_ptr;
 static size_t heap_mem_left;
 
-#define NON_COMP_DEFAULT_SIZE (1024 * 1024) // 1 GB
+#define NON_COMP_DEFAULT_SIZE (1024 * 1024 * 1024) // 1 GB
 
 void *
 malloc(size_t to_alloc)

@@ -27,7 +27,11 @@ find_comp_entry_points(char **, size_t, struct Compartment *);
 static void
 resolve_rela_syms(struct Compartment *);
 static struct LibSymSearchResult
-find_lib_dep_sym_in_comp(const char *, struct Compartment *, unsigned short);
+find_lib_dep_sym_in_comp(const char *, struct Compartment *, const size_t,
+    const unsigned short, bool);
+static struct LibSymSearchResult
+find_lib_dep_sym_in_lib(
+    const char *, struct Compartment *, const size_t, const unsigned short);
 static void *
 extract_sym_offset(struct Compartment *, struct LibSymSearchResult);
 
@@ -122,6 +126,7 @@ comp_from_elf(char *filename, char **entry_points, size_t entry_point_count,
     {
         struct LibDependency *parsed_lib
             = parse_lib_file(libs_to_parse[libs_parsed_count], new_comp);
+        print_lib_dep(parsed_lib);
 
         // Get `tls_lookup_func` if we parsed `comp_utils.so`
         if (!strcmp(parsed_lib->lib_name, comp_utils_soname))
@@ -167,8 +172,8 @@ comp_from_elf(char *filename, char **entry_points, size_t entry_point_count,
     init_comp_scratch_mem(new_comp);
     setup_environ(new_comp);
     find_comp_entry_points(entry_points, entry_point_count, new_comp);
-    resolve_rela_syms(new_comp);
     resolve_comp_tls_regions(new_comp);
+    resolve_rela_syms(new_comp);
 
     // Compartment size sanity check
     assert(new_comp->mem_top
@@ -398,7 +403,6 @@ comp_clean(struct Compartment *to_clean)
     free(to_clean->entry_points);
     if (to_clean->libs_tls_sects)
     {
-        free(to_clean->libs_tls_sects->lib_idxs);
         free(to_clean->libs_tls_sects);
     }
     free(to_clean);
@@ -694,7 +698,7 @@ parse_lib_rela(Elf64_Shdr *rela_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
     // Prepare TLS look-up function relocation (will be copied for each TLS
     // relocation entry
     static struct LibRelaMapping tls_lrm
-        = { NULL, 0x0, 0x0, -1, STT_FUNC, STB_GLOBAL };
+        = { NULL, 0x0, 0x0, -1, STT_FUNC, STB_GLOBAL, 0 };
 
     // Log symbols that will need to be relocated eagerly at maptime
     Elf64_Rela curr_rela;
@@ -705,7 +709,8 @@ parse_lib_rela(Elf64_Shdr *rela_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
         size_t curr_rela_sym_idx = ELF64_R_SYM(curr_rela.r_info);
         size_t curr_rela_type = ELF64_R_TYPE(curr_rela.r_info);
 
-        struct LibRelaMapping lrm = { NULL, 0x0, 0x0, curr_rela_type, -1, -1 };
+        struct LibRelaMapping lrm
+            = { NULL, 0x0, 0x0, curr_rela_type, -1, -1, 0 };
 
         // XXX We handle `TLS` symbols differently. It seems the way
         // AARCH64 handles TLS variables is preferentially via
@@ -752,14 +757,22 @@ parse_lib_rela(Elf64_Shdr *rela_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
             {
                 lrm.rela_sym_type = STT_TLS;
                 lrm.rela_sym_bind = STB_GLOBAL; // TODO help
+                lrm.rela_sym_shndx = 1; // TODO better index?
                 lrm.target_func_address = (void *) curr_rela.r_addend;
             }
             else
             {
                 Elf64_Sym curr_rela_sym = dyn_sym_tbl[curr_rela_sym_idx];
+                lrm.rela_name
+                    = malloc(strlen(&dyn_str_tbl[curr_rela_sym.st_name]) + 1);
+                strcpy(lrm.rela_name, &dyn_str_tbl[curr_rela_sym.st_name]);
                 lrm.rela_sym_type = ELF64_ST_TYPE(curr_rela_sym.st_info);
                 lrm.rela_sym_bind = ELF64_ST_BIND(curr_rela_sym.st_info);
-                lrm.target_func_address = (void *) curr_rela_sym.st_value;
+                lrm.rela_sym_shndx = curr_rela_sym.st_shndx;
+                if (lrm.rela_sym_shndx != 0)
+                {
+                    lrm.target_func_address = (void *) curr_rela_sym.st_value;
+                }
             }
 
             // Offset relocation address by one slot, due to the lookup
@@ -802,8 +815,8 @@ parse_lib_rela(Elf64_Shdr *rela_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
                 strcpy(lrm.rela_name, &dyn_str_tbl[curr_rela_sym.st_name]);
                 lrm.rela_sym_type = ELF64_ST_TYPE(curr_rela_sym.st_info);
                 lrm.rela_sym_bind = ELF64_ST_BIND(curr_rela_sym.st_info);
-                if (curr_rela_sym.st_value != 0
-                    && lrm.rela_sym_bind != STB_WEAK)
+                lrm.rela_sym_shndx = curr_rela_sym.st_shndx;
+                if (lrm.rela_sym_shndx != 0 && lrm.rela_sym_bind != STB_WEAK)
                 {
                     lrm.target_func_address = curr_rela_sym.st_value
                         + (char *) lib_dep->lib_mem_base;
@@ -874,9 +887,11 @@ find_comp_entry_points(
         = malloc(entry_point_count * sizeof(struct CompEntryPoint));
     for (size_t i = 0; i < entry_point_count; ++i)
     {
-        struct LibSymSearchResult found_sym
-            = find_lib_dep_sym_in_comp(entry_points[i], new_comp, STT_FUNC);
-        if (found_sym.lib_idx == USHRT_MAX)
+        // TODO are entry points always in the main loaded library?
+        // TODO is the main loaded library always the 0th indexed one?
+        struct LibSymSearchResult found_sym = find_lib_dep_sym_in_comp(
+            entry_points[i], new_comp, 0, STT_FUNC, true);
+        if (!found_sym.found)
         {
             errx(1, "Did not find entry point %s!\n", entry_points[i]);
         }
@@ -892,14 +907,18 @@ resolve_rela_syms(struct Compartment *new_comp)
 {
     // Find all symbols for eager relocation mapping
     size_t prev_tls_secs_size = 0;
+    struct LibRelaMapping *curr_rela_map;
+    struct LibSymSearchResult found_sym;
     for (size_t i = 0; i < new_comp->libs_count; ++i)
     {
         for (size_t j = 0; j < new_comp->libs[i]->rela_maps_count; ++j)
         {
-            struct LibRelaMapping *curr_rela_map
-                = &new_comp->libs[i]->rela_maps[j];
+            curr_rela_map = &new_comp->libs[i]->rela_maps[j];
 
-            if (curr_rela_map->rela_sym_type == STT_TLS)
+            // This is a TLS variable that exists in the current library; we
+            // just allocate the space for it
+            if (curr_rela_map->rela_sym_type == STT_TLS
+                && curr_rela_map->rela_sym_shndx != 0)
             {
                 curr_rela_map->target_func_address
                     = (char *) curr_rela_map->target_func_address
@@ -927,10 +946,27 @@ resolve_rela_syms(struct Compartment *new_comp)
                 continue;
             }
 
-            struct LibSymSearchResult found_sym
-                = find_lib_dep_sym_in_comp(curr_rela_map->rela_name, new_comp,
-                    curr_rela_map->rela_sym_type);
-            if (found_sym.lib_idx == USHRT_MAX)
+            // Prioritise looking for weak symbols in libraries outside the
+            // source library, even if they are defined
+            if (curr_rela_map->rela_sym_bind == STB_WEAK)
+            {
+                found_sym = find_lib_dep_sym_in_comp(curr_rela_map->rela_name,
+                    new_comp, i, curr_rela_map->rela_sym_type, false);
+                if (!found_sym.found)
+                {
+                    found_sym
+                        = find_lib_dep_sym_in_comp(curr_rela_map->rela_name,
+                            new_comp, i, curr_rela_map->rela_sym_type, true);
+                }
+            }
+            else
+            {
+                found_sym = find_lib_dep_sym_in_comp(curr_rela_map->rela_name,
+                    new_comp, i, curr_rela_map->rela_sym_type,
+                    curr_rela_map->rela_sym_shndx != 0);
+            }
+
+            if (!found_sym.found)
             {
                 if (curr_rela_map->rela_sym_bind == STB_WEAK)
                 {
@@ -950,8 +986,20 @@ resolve_rela_syms(struct Compartment *new_comp)
                         j, new_comp->libs[i]->lib_name, i);
                 }
             }
-            curr_rela_map->target_func_address
-                = extract_sym_offset(new_comp, found_sym);
+
+            if (curr_rela_map->rela_sym_type == STT_TLS)
+            {
+                curr_rela_map->target_func_address
+                    = (char *) new_comp->libs[found_sym.lib_idx]
+                          ->lib_syms[found_sym.sym_idx]
+                          .sym_offset
+                    + new_comp->libs[found_sym.lib_idx]->tls_offset;
+            }
+            else
+            {
+                curr_rela_map->target_func_address
+                    = extract_sym_offset(new_comp, found_sym);
+            }
         }
         prev_tls_secs_size += new_comp->libs[i]->tls_sec_size;
     }
@@ -981,47 +1029,78 @@ extract_sym_offset(struct Compartment *comp, struct LibSymSearchResult res)
 
 static struct LibSymSearchResult
 find_lib_dep_sym_in_comp(const char *to_find,
-    struct Compartment *comp_to_search, const unsigned short sym_type)
+    struct Compartment *comp_to_search, const size_t source_lib_idx,
+    const unsigned short sym_type, bool in_lib)
 {
-    for (size_t i = 0; i < comp_to_search->libs_count; ++i)
+    struct LibSymSearchResult res = { -1, -1, false };
+    if (in_lib)
     {
-        for (size_t j = 0; j < comp_to_search->libs[i]->lib_syms_count; ++j)
+        res = find_lib_dep_sym_in_lib(
+            to_find, comp_to_search, source_lib_idx, sym_type);
+    }
+    else
+    {
+        for (size_t i = 0; i < comp_to_search->libs_count; ++i)
         {
-            // Ignore non-symbol relocations
-            if (!comp_to_search->libs[i]->lib_syms[j].sym_name)
+            if (i == source_lib_idx)
             {
                 continue;
             }
-
-            // TODO eyeball performance of this approach versus using `&&`
-            // Ignore `LOCAL` bind symbols - they cannot be relocated against
-            bool cond
-                = comp_to_search->libs[i]->lib_syms[j].sym_bind != STB_LOCAL;
-
-            // Check symbol name matches
-            cond = cond
-                && !strcmp(
-                    to_find, comp_to_search->libs[i]->lib_syms[j].sym_name);
-
-            // Check symbol type matches
-            cond = cond
-                && comp_to_search->libs[i]->lib_syms[j].sym_type == sym_type;
-
-            // Symbols cannot have 0-offset values
-            if (sym_type != STT_TLS)
+            res = find_lib_dep_sym_in_lib(to_find, comp_to_search, i, sym_type);
+            if (res.found)
             {
-                cond = cond
-                    && comp_to_search->libs[i]->lib_syms[j].sym_offset != 0;
-            }
-
-            if (cond)
-            {
-                struct LibSymSearchResult res = { i, j };
-                return res;
+                break;
             }
         }
     }
-    struct LibSymSearchResult res = { -1, -1 };
+    return res;
+}
+
+static struct LibSymSearchResult
+find_lib_dep_sym_in_lib(const char *to_find, struct Compartment *comp_to_search,
+    const size_t lib_idx, const unsigned short sym_type)
+{
+    const size_t syms_count = comp_to_search->libs[lib_idx]->lib_syms_count;
+    const struct LibDependencySymbol *syms
+        = comp_to_search->libs[lib_idx]->lib_syms;
+    struct LibSymSearchResult res = { -1, -1, false };
+    for (size_t i = 0; i < syms_count; ++i)
+    {
+        struct LibDependencySymbol curr_sym = syms[i];
+
+        // Ignore no-named symbols
+        if (!curr_sym.sym_name)
+        {
+            continue;
+        }
+
+        // We build up the conditions needed to find a valid symbol to be
+        // relocated against in `cond`
+        //
+        // Ignore `LOCAL` bind symbols - they cannot be relocated against
+        bool cond = curr_sym.sym_bind != STB_LOCAL;
+
+        // Check symbol name matches
+        cond = cond && !strcmp(to_find, curr_sym.sym_name);
+
+        // Check symbol type matches
+        cond = cond && curr_sym.sym_type == sym_type;
+
+        // Symbols cannot have 0-offset values (except if they are a TLS symbol)
+        if (sym_type != STT_TLS)
+        {
+            cond = cond && curr_sym.sym_offset != 0;
+        }
+
+        // If all conditions pass, we found a valid symbol to relocate against
+        if (cond)
+        {
+            res = (struct LibSymSearchResult) {
+                .lib_idx = lib_idx, .sym_idx = i, .found = true
+            };
+            break;
+        }
+    }
     return res;
 }
 
@@ -1119,9 +1198,6 @@ resolve_comp_tls_regions(struct Compartment *new_comp)
     new_comp->libs_tls_sects->region_start = new_comp->mem_top;
     new_comp->libs_tls_sects->libs_count = 0;
 
-    unsigned short *lib_idxs
-        = malloc(new_comp->libs_count * sizeof(unsigned short));
-    unsigned short actual_idxs = 0;
     size_t comp_tls_size = 0;
     for (size_t i = 0; i < new_comp->libs_count; ++i)
     {
@@ -1129,16 +1205,12 @@ resolve_comp_tls_regions(struct Compartment *new_comp)
         {
             continue;
         }
+
+        new_comp->libs[i]->tls_offset = comp_tls_size;
         comp_tls_size += new_comp->libs[i]->tls_sec_size;
         new_comp->libs_tls_sects->libs_count += 1;
-
-        lib_idxs[actual_idxs] = i;
-        actual_idxs += 1;
     }
     comp_tls_size = align_up(comp_tls_size, 16);
-    lib_idxs = realloc(lib_idxs,
-        new_comp->libs_tls_sects->libs_count * sizeof(unsigned short));
-    new_comp->libs_tls_sects->lib_idxs = lib_idxs;
 
     intptr_t total_tls_size
         = comp_tls_size * new_comp->libs_tls_sects->region_count;
@@ -1223,18 +1295,13 @@ print_comp(struct Compartment *to_print)
     printf("- libs_count : %lu\n", to_print->libs_count);
     printf("- entry_point_count : %lu\n", to_print->entry_point_count);
     // TODO entry_points
-    printf("- tld_lookup_func : %p\n", to_print->tls_lookup_func);
+    printf("- tls_lookup_func : %p\n", to_print->tls_lookup_func);
     printf("- libs_tls_sects :\n");
     printf("\t> region_count : %hu\n", to_print->libs_tls_sects->region_count);
     printf("\t> region_size : 0x%zx\n", to_print->libs_tls_sects->region_size);
     // TODO region_start
     printf("\t> region_start : %p\n", to_print->libs_tls_sects->region_start);
     printf("\t> libs_count : %hu\n", to_print->libs_tls_sects->libs_count);
-    printf("\t> libs_idxs : ");
-    for (unsigned short i = 0; i < to_print->libs_tls_sects->libs_count; ++i)
-    {
-        printf("%hu,", to_print->libs_tls_sects->lib_idxs[i]);
-    }
     printf("\n");
 
     printf("- page_size : %lu\n", to_print->page_size);
