@@ -177,7 +177,7 @@ set(tests
     "simple_syscall_write"
     "simple_thrloc_var"
     "simple_time"
-    #"simple_toupper"
+    "simple_toupper"
     "simple_va_args"
     "tls_check"
 
