@@ -24,6 +24,16 @@ REMOTE_LIBS = [
         "/lib/libm.so.5",
         ]
 
+LUA_TESTS_PATH = "./third-party/lua/testes"
+LUA_TESTS = [
+        "calls.lua",
+        "goto.lua",
+        "strings.lua",
+        "tpack.lua",
+        "tracegc.lua",
+        "utf8.lua",
+        ]
+
 ################################################################################
 # Main
 ################################################################################
@@ -33,6 +43,7 @@ vm_conn = Connection(host = CHERIBSD_HOST, user = CHERIBSD_USER, port = CHERIBSD
 home_dir = vm_conn.run("echo $HOME", hide = True).stdout.strip()
 CHERIBSD_TEST_DIR = os.path.join(home_dir, CHERIBSD_TEST_DIR)
 COMP_LIBRARY_PATH = os.path.join(home_dir, COMP_LIBRARY_PATH)
+LUA_TESTS_DIR = os.path.join(CHERIBSD_TEST_DIR, "lua")
 remote_env = {
         'COMP_LIBRARY_PATH': COMP_LIBRARY_PATH,
         'LD_LIBRARY_PATH': COMP_LIBRARY_PATH,
@@ -40,8 +51,12 @@ remote_env = {
 
 vm_conn.run(f'mkdir -p {CHERIBSD_TEST_DIR}')
 vm_conn.run(f'mkdir -p {COMP_LIBRARY_PATH}')
+vm_conn.run(f'mkdir -p {LUA_TESTS_DIR}')
+vm_conn.run
 for lib in LOCAL_LIBS:
     vm_conn.put(lib, remote = f'{COMP_LIBRARY_PATH}', )
+for test in LUA_TESTS:
+    vm_conn.put(os.path.join(LUA_TESTS_PATH, test), remote = f'{LUA_TESTS_DIR}', )
 for lib in REMOTE_LIBS:
     cmd = f'cd {COMP_LIBRARY_PATH} ; ln -s {lib}'
     vm_conn.run(cmd)
