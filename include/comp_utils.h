@@ -2,7 +2,9 @@
 #define _COMP_UTILS_H
 
 #include <err.h>
+#include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 #include <sys/mman.h>
 
