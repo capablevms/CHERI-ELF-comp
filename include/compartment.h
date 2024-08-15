@@ -192,6 +192,7 @@ struct Compartment
     // Scratch memory
     void *scratch_mem_base;
     size_t scratch_mem_size;
+    size_t scratch_mem_extra;
 
     size_t scratch_mem_heap_size;
     void *scratch_mem_stack_top;
@@ -203,6 +204,7 @@ struct Compartment
     size_t entry_point_count;
     struct CompEntryPoint *entry_points;
     void *tls_lookup_func;
+    size_t total_tls_size;
     struct TLSDesc *libs_tls_sects;
 
     // Hardware info - maybe move
