@@ -22,6 +22,8 @@ const size_t max_env_sz
     = max_env_count * sizeof(char *) + avg_sz_per_env_entry * max_env_count;
 extern char **environ;
 
+// Functions
+
 static struct CompEntryPointDef *
 parse_compartment_config(char *, size_t *, bool);
 static struct CompEntryPointDef *
@@ -35,6 +37,13 @@ prepare_compartment_args(char **args, struct CompEntryPointDef);
 
 static struct CompWithEntries *
 get_comp_with_entries(struct Compartment *);
+
+// Printing
+static void print_full_cap(uintcap_t);
+static void
+pp_cap(void *__capability);
+static void
+print_comp(struct Compartment *);
 
 /*******************************************************************************
  * Utility functions
@@ -111,7 +120,7 @@ register_new_comp(char *filename, bool allow_default_entry)
     new_comp_ddc = cheri_bounds_set(
         new_comp_ddc, (char *) new_comp->mem_top - (char *) new_comp->base);
     new_comp_ddc = cheri_offset_set(new_comp_ddc,
-        (char *) new_comp->scratch_mem_base - (char *) new_comp->base);
+        (char *) new_comp->scratch_mem_stack_top - (char *) new_comp->base);
     new_comp->ddc = new_comp_ddc;
 
     struct CompWithEntries *new_cwe = malloc(sizeof(struct CompWithEntries));
@@ -416,4 +425,56 @@ make_default_entry_point()
     cep->arg_count = 0;
     cep->args_type = NULL;
     return cep;
+}
+
+static void
+print_comp(struct Compartment *to_print)
+{
+    printf("== COMPARTMENT\n");
+    printf("- id : %lu\n", to_print->id);
+    {
+        printf("- DDC : ");
+        printf(" base - 0x%lx ", cheri_base_get(to_print->ddc));
+        printf(" length - 0x%lx ", cheri_length_get(to_print->ddc));
+        printf(" address - 0x%lx ", cheri_address_get(to_print->ddc));
+        printf(" offset - 0x%lx ", cheri_offset_get(to_print->ddc));
+        printf("\n");
+    }
+    printf("- size : 0x%zx\n", to_print->size);
+    printf("- base : %p\n", to_print->base);
+    printf("- mem_top : %p\n", to_print->mem_top);
+    printf("- mapped : %s\n", to_print->mapped ? "true" : "false");
+
+    printf("- environ_ptr : %p\n", (void *) to_print->environ_ptr);
+    printf("- environ_sz : 0x%zx\n", to_print->environ_sz);
+
+    printf("- scratch_mem_base : %p\n", to_print->scratch_mem_base);
+    printf("- scratch_mem_size : %#zx", to_print->scratch_mem_size);
+    printf(" [0x%zx heap + %#zx stack]\n", to_print->scratch_mem_heap_size,
+        to_print->scratch_mem_stack_size);
+    printf("- scratch_mem_extra : %#zx", to_print->scratch_mem_extra);
+    printf(" [%#zx tls + %#zx environ]\n", to_print->total_tls_size,
+        to_print->environ_sz);
+    printf(
+        "- scratch_mem_heap_size : 0x%zx\n", to_print->scratch_mem_heap_size);
+    printf("- scratch_mem_stack_top : %p\n", to_print->scratch_mem_stack_top);
+    printf(
+        "- scratch_mem_stack_size : 0x%zx\n", to_print->scratch_mem_stack_size);
+
+    printf("- libs_count : %lu\n", to_print->libs_count);
+    printf("- entry_point_count : %lu\n", to_print->entry_point_count);
+    // TODO entry_points
+    printf("- tls_lookup_func : %p\n", to_print->tls_lookup_func);
+    printf("- total_tls_size : %#zx\n", to_print->total_tls_size);
+    printf("- libs_tls_sects :\n");
+    printf("\t> region_count : %hu\n", to_print->libs_tls_sects->region_count);
+    printf("\t> region_size : 0x%zx\n", to_print->libs_tls_sects->region_size);
+    // TODO region_start
+    printf("\t> region_start : %p\n", to_print->libs_tls_sects->region_start);
+    printf("\t> libs_count : %hu\n", to_print->libs_tls_sects->libs_count);
+    printf("\n");
+
+    printf("- page_size : %lu\n", to_print->page_size);
+
+    printf("== DONE\n");
 }

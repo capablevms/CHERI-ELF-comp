@@ -8,6 +8,12 @@ check_next(void *addr, void *to_check)
     assert(*((void **) ((char *) addr - sizeof(void *))) == to_check);
 }
 
+static void
+double_val(int *v)
+{
+    *v = *v * 2;
+}
+
 int
 main(void)
 {
@@ -37,6 +43,13 @@ main(void)
     tmp01 = malloc(2 * malloc_block_sz);
     free(tmp02);
     free(tmp01);
+
+    // Check stack and heap disjointment
+    int *int01 = malloc(1 * sizeof(int));
+    *int01 = 42;
+    double_val(int01);
+    assert(*int01 == 84);
+    free(int01);
 
     // Check realloc
     void *tmp11 = realloc(NULL, 2 * malloc_block_sz);

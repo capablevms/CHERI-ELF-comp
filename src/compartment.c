@@ -43,6 +43,8 @@ static void
 init_comp_scratch_mem(struct Compartment *);
 static void
 adjust_comp_scratch_mem(struct Compartment *, size_t);
+static inline void *
+get_extra_scratch_region_base(struct Compartment *);
 static void
 setup_environ(struct Compartment *);
 static void
@@ -52,8 +54,6 @@ static void
 print_lib_dep_seg(struct SegmentMap *);
 static void
 print_lib_dep(struct LibDependency *);
-static void
-print_comp(struct Compartment *);
 
 /*******************************************************************************
  * Main compartment functions
@@ -82,6 +82,7 @@ comp_init()
     new_comp->scratch_mem_heap_size = 0;
     new_comp->scratch_mem_stack_top = NULL;
     new_comp->scratch_mem_stack_size = 0;
+    new_comp->scratch_mem_extra = 0;
 
     new_comp->libs_count = 0;
     new_comp->libs = NULL;
@@ -126,7 +127,6 @@ comp_from_elf(char *filename, char **entry_points, size_t entry_point_count,
     {
         struct LibDependency *parsed_lib
             = parse_lib_file(libs_to_parse[libs_parsed_count], new_comp);
-        print_lib_dep(parsed_lib);
 
         // Get `tls_lookup_func` if we parsed `comp_utils.so`
         if (!strcmp(parsed_lib->lib_name, comp_utils_soname))
@@ -183,6 +183,19 @@ comp_from_elf(char *filename, char **entry_points, size_t entry_point_count,
             + // buffer between scratch memory and compartment libraries
             new_comp->scratch_mem_size // size of scratch memory
     );
+    assert(new_comp->scratch_mem_size % new_comp->page_size == 0);
+
+    /* Check correct scratch memory layout; we expect the stack and the heap to
+     * reside consecutively, with the heap at the edge of the compartment
+     * boundary, and any extra memory required residing before the stack.
+     *
+     * Potential extra memory regions: TLS, environ
+     */
+    assert((char *) new_comp->scratch_mem_base + new_comp->scratch_mem_extra
+            + new_comp->scratch_mem_stack_size
+        == new_comp->scratch_mem_stack_top);
+    assert(new_comp->environ_sz + new_comp->total_tls_size
+        == new_comp->scratch_mem_extra);
 
     return new_comp;
 }
@@ -228,6 +241,8 @@ comp_map(struct Compartment *to_map)
     // Map compartment scratch memory - heap, stack, sealed manager
     // capabilities for transition out, capabilities to call other compartments
     // (TODO fix this), TLS region (if applicable)
+    assert((intptr_t) to_map->scratch_mem_base % to_map->page_size == 0);
+    assert(to_map->scratch_mem_size % to_map->page_size == 0);
     map_result
         = mmap((void *) to_map->scratch_mem_base, to_map->scratch_mem_size,
             PROT_READ | PROT_WRITE, // | PROT_EXEC, // TODO Fix this
@@ -1132,7 +1147,14 @@ find_in_dir(const char *const lib_name, char *search_dir)
     return NULL;
 }
 
-// TODO carefully recheck all the numbers are right
+/* Lay out compartment's stack and heap. They each grow from
+ * `scratch_mem_stack_top`, with the stack growing downward, and the heap
+ * growing upwards. The heap shall reside at the edge of the DDC, such that any
+ * heap overflows will trigger a SIGPROT. Any further scratch memory required
+ * (such as for TLS) will be added at `scratch_mem_base`, and
+ * `scratch_mem_stack_top` will be adjusted appropriately, via
+ * `adjust_comp_scratch_mem()`.
+ */
 static void
 init_comp_scratch_mem(struct Compartment *new_comp)
 {
@@ -1142,7 +1164,7 @@ init_comp_scratch_mem(struct Compartment *new_comp)
     new_comp->scratch_mem_heap_size = 0x800000UL; // TODO
     new_comp->scratch_mem_stack_size = 0x80000UL; // TODO
     new_comp->scratch_mem_stack_top = align_down(
-        (char *) new_comp->scratch_mem_base + new_comp->scratch_mem_heap_size,
+        (char *) new_comp->scratch_mem_base + new_comp->scratch_mem_stack_size,
         16);
 
     new_comp->scratch_mem_size
@@ -1162,14 +1184,29 @@ init_comp_scratch_mem(struct Compartment *new_comp)
                - new_comp->scratch_mem_stack_size)
             % 16
         == 0);
-    assert(new_comp->scratch_mem_size % 16 == 0);
+    assert(new_comp->scratch_mem_size % new_comp->page_size == 0);
 }
 
 static void
 adjust_comp_scratch_mem(struct Compartment *new_comp, size_t to_adjust)
 {
+    assert(to_adjust % new_comp->page_size == 0);
     new_comp->scratch_mem_size += to_adjust;
+    new_comp->scratch_mem_stack_top
+        = (char *) new_comp->scratch_mem_stack_top + to_adjust;
     new_comp->mem_top = (char *) new_comp->mem_top + to_adjust;
+    new_comp->scratch_mem_extra += to_adjust;
+}
+
+/* New scratch regions will be added after previous extra regions
+ */
+static inline void *
+get_extra_scratch_region_base(struct Compartment *new_comp)
+{
+    char *new_scratch_region_base
+        = (char *) new_comp->scratch_mem_base + new_comp->scratch_mem_extra;
+    assert((intptr_t) new_scratch_region_base % new_comp->page_size == 0);
+    return new_scratch_region_base;
 }
 
 static void
@@ -1178,7 +1215,7 @@ setup_environ(struct Compartment *new_comp)
     assert(proc_env_ptr != NULL); // TODO consider optional check
     new_comp->environ_sz
         = align_up(max_env_sz, new_comp->page_size) + new_comp->page_size;
-    new_comp->environ_ptr = new_comp->mem_top;
+    new_comp->environ_ptr = get_extra_scratch_region_base(new_comp);
     adjust_comp_scratch_mem(new_comp, new_comp->environ_sz);
 }
 
@@ -1193,7 +1230,8 @@ resolve_comp_tls_regions(struct Compartment *new_comp)
 
     // TODO currently we only support one thread
     new_comp->libs_tls_sects->region_count = 1;
-    new_comp->libs_tls_sects->region_start = new_comp->mem_top;
+    new_comp->libs_tls_sects->region_start
+        = get_extra_scratch_region_base(new_comp);
     new_comp->libs_tls_sects->libs_count = 0;
 
     size_t comp_tls_size = 0;
@@ -1212,11 +1250,10 @@ resolve_comp_tls_regions(struct Compartment *new_comp)
 
     intptr_t total_tls_size
         = comp_tls_size * new_comp->libs_tls_sects->region_count;
+    total_tls_size = align_up(total_tls_size, new_comp->page_size);
     adjust_comp_scratch_mem(new_comp, total_tls_size);
+    new_comp->total_tls_size = total_tls_size;
     new_comp->libs_tls_sects->region_size = comp_tls_size;
-
-    assert((uintptr_t) new_comp->libs_tls_sects->region_start % 16 == 0);
-    // TODO reconsider scratch memory layout
 }
 
 /*******************************************************************************
@@ -1257,52 +1294,5 @@ print_lib_dep(struct LibDependency *lib_dep)
     }
 
     printf("- rela_maps_count : %zu\n", lib_dep->rela_maps_count);
-    printf("== DONE\n");
-}
-
-static void
-print_comp(struct Compartment *to_print)
-{
-    printf("== COMPARTMENT\n");
-    printf("- id : %lu\n", to_print->id);
-    {
-        printf("- DDC : ");
-        printf(" base - 0x%lx ", cheri_base_get(to_print->ddc));
-        printf(" length - 0x%lx ", cheri_length_get(to_print->ddc));
-        printf(" address - 0x%lx ", cheri_address_get(to_print->ddc));
-        printf(" offset - 0x%lx ", cheri_offset_get(to_print->ddc));
-        printf("\n");
-    }
-    printf("- size : 0x%zx\n", to_print->size);
-    printf("- base : %p\n", to_print->base);
-    printf("- mem_top : %p\n", to_print->mem_top);
-    printf("- mapped : %s\n", to_print->mapped ? "true" : "false");
-
-    printf("- scratch_mem_base : %p\n", to_print->scratch_mem_base);
-    printf("- scratch_mem_size : 0x%zx", to_print->scratch_mem_size);
-    printf(" [0x%zx heap + 0x%zx stack + 0x%zx tls]\n",
-        to_print->scratch_mem_heap_size, to_print->scratch_mem_stack_size,
-        to_print->libs_tls_sects->region_size
-            * to_print->libs_tls_sects->region_count);
-    printf(
-        "- scratch_mem_heap_size : 0x%zx\n", to_print->scratch_mem_heap_size);
-    printf("- scratch_mem_stack_top : %p\n", to_print->scratch_mem_stack_top);
-    printf(
-        "- scratch_mem_stack_size : 0x%zx\n", to_print->scratch_mem_stack_size);
-
-    printf("- libs_count : %lu\n", to_print->libs_count);
-    printf("- entry_point_count : %lu\n", to_print->entry_point_count);
-    // TODO entry_points
-    printf("- tls_lookup_func : %p\n", to_print->tls_lookup_func);
-    printf("- libs_tls_sects :\n");
-    printf("\t> region_count : %hu\n", to_print->libs_tls_sects->region_count);
-    printf("\t> region_size : 0x%zx\n", to_print->libs_tls_sects->region_size);
-    // TODO region_start
-    printf("\t> region_start : %p\n", to_print->libs_tls_sects->region_start);
-    printf("\t> libs_count : %hu\n", to_print->libs_tls_sects->libs_count);
-    printf("\n");
-
-    printf("- page_size : %lu\n", to_print->page_size);
-
     printf("== DONE\n");
 }

@@ -96,10 +96,9 @@ malloc(size_t to_alloc)
     */
     size_t to_alloc_total = to_alloc + block_metadata_sz;
 
-    // TODO replace with return NULL and check `mem_left` works
     if (to_alloc_total > mem_left)
     {
-        errx(1, "comp_utils: Insufficient heap space left.");
+        return NULL;
     }
 
     // Find a sufficiently large block to allocate

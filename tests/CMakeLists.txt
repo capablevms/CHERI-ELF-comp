@@ -133,6 +133,7 @@ set(comp_binaries
     "simple_global_var-external"
     "simple_libc"
     "simple_malloc"
+    "simple_malloc_saturate"
     "simple_open_write"
     "simple_printf"
     "simple_static_var"
@@ -170,6 +171,7 @@ set(tests
     "simple_global_var"
     "simple_libc"
     "simple_malloc"
+    "simple_malloc_saturate"
     "simple_open_write"
     "simple_printf"
     "simple_static_var"
@@ -198,6 +200,10 @@ set(tests
     "args-long-min args_simple check_llong_min -9223372036854775808"
     "args-ulong-max args_simple check_ullong_max 18446744073709551615"
     )
+
+set(tests_fail
+    "simple_malloc_saturate@Memory saturated."
+)
 
 # Build targets
 foreach(comp_t IN LISTS comp_binaries)
@@ -259,4 +265,12 @@ foreach(test_t IN LISTS tests)
         list(SUBLIST test_t_list 2 -1 test_args)
         new_test(${test_name} ${test_bin} "${test_args}")
     endif()
+endforeach()
+
+foreach(test_t IN LISTS tests_fail)
+    string(FIND ${test_t} "@" delim_pos)
+    string(SUBSTRING ${test_t} 0 ${delim_pos} test_name)
+    string(SUBSTRING ${test_t} ${delim_pos} -1 pass_regex)
+    string(SUBSTRING ${pass_regex} 1 -1 pass_regex)
+    set_property(TEST ${test_name} PROPERTY PASS_REGULAR_EXPRESSION ${pass_regex})
 endforeach()

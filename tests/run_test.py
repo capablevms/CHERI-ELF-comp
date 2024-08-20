@@ -2,6 +2,7 @@
 import argparse
 import pathlib
 import os
+import sys
 
 from fabric import Connection
 
@@ -37,7 +38,7 @@ def put_file(conn, src_file):
     conn.put(src_file, remote = f'{CHERIBSD_TEST_DIR}/')
 
 def exec_cmd(conn, cmd, remote_env):
-    return conn.run(cmd, env = remote_env, echo = True)
+    return conn.run(cmd, env = remote_env, echo = True, warn = True)
 
 ################################################################################
 # Main
@@ -56,5 +57,6 @@ remote_env = {
 file_deps = [args.test, *args.dependencies]
 for dep in file_deps:
     put_file(vm_conn, dep)
-exec_cmd(vm_conn, f'cd {CHERIBSD_TEST_DIR} ; ./{args.test.name} {" ".join(args.test_args)}', remote_env)
+res = exec_cmd(vm_conn, f'cd {CHERIBSD_TEST_DIR} ; ./{args.test.name} {" ".join(args.test_args)}', remote_env)
 vm_conn.close()
+sys.exit(res.exited)
