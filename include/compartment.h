@@ -60,13 +60,9 @@ extern void *__capability comp_return_caps[2];
 #error Expecting 64-bit Arm Morello platform
 #endif
 
-/* Struct representing a valid entry point to a compartment
- */
-struct CompEntryPoint
-{
-    const char *fn_name;
-    void *fn_addr;
-};
+// Default sizes for compartment heap and stack, if not explicitly given
+#define DEFAULT_COMP_HEAP_SZ 0x800000UL // 800kB
+#define DEFAULT_COMP_STACK_SZ 0x80000UL // 80kB
 
 /* Struct representing one segment of an ELF binary.
  *
@@ -169,14 +165,38 @@ struct TLSDesc
     unsigned short libs_count;
 };
 
+/* Struct representing configuration data for one entry point; this is just
+ * information that we expect to appear in the compartment, as given by its
+ * compartment configuration file
+ */
+struct CompEntryPointDef
+{
+    char *name;
+    size_t arg_count;
+    char **args_type;
+    void *comp_addr;
+};
+
+/* Struct representing a compartment configuration.
+ */
+struct CompConfig
+{
+    size_t heap_size;
+    size_t stack_size;
+    struct CompEntryPointDef *entry_points;
+    size_t entry_point_count;
+    void *base_address;
+};
+
 /**
  * Struct representing ELF data necessary to load and eventually execute a
  * compartment
  */
 struct Compartment
 {
-    // Identifiers
+    // Identifiers, manager by `manager.c`
     size_t id;
+    struct CompConfig *cc;
     // Execution info
     void *__capability ddc;
     // ELF data
@@ -201,8 +221,6 @@ struct Compartment
     // Internal libraries and relocations
     size_t libs_count;
     struct LibDependency **libs;
-    size_t entry_point_count;
-    struct CompEntryPoint *entry_points;
     void *tls_lookup_func;
     size_t total_tls_size;
     struct TLSDesc *libs_tls_sects;
@@ -216,7 +234,7 @@ entry_point_cmp(const void *, const void *);
 struct Compartment *
 comp_init();
 struct Compartment *
-comp_from_elf(char *, char **, size_t, void *);
+comp_from_elf(char *, struct CompConfig *); // char **, size_t, void *);
 void
 comp_map(struct Compartment *);
 void

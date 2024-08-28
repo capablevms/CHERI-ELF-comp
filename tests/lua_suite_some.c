@@ -10,7 +10,21 @@ int
 main()
 {
     const char *test_dir = "./lua";
-    const char *test_names[] = { "strings.lua", "calls.lua", "utf8.lua" };
+    const char *test_names[] = { "strings.lua", "utf8.lua", "goto.lua",
+        "tpack.lua", "tracegc.lua", "calls.lua" };
+    // TODO disabled due to extremely long runtime; needs profiling
+    /*const char *test_names[] = { "gc.lua" };*/
+
+    /* `lua_dofile` not returning `LUA_OK`, even without compartmentalisation
+     * api.lua
+     * attrib.lua
+     * big.lua
+     * cstack.lua
+     */
+
+    /* Internally skipped tests (needs additional testing infrastructure support
+     * for `lua`) api.c
+     */
 
     lua_State *L = luaL_newstate();
     luaL_openlibs(L);

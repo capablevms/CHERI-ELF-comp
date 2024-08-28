@@ -26,12 +26,12 @@ REMOTE_LIBS = [
 
 LUA_TESTS_PATH = "./third-party/lua/testes"
 LUA_TESTS = [
-        "calls.lua",
-        "goto.lua",
         "strings.lua",
+        "utf8.lua",
+        "goto.lua",
         "tpack.lua",
         "tracegc.lua",
-        "utf8.lua",
+        "calls.lua",
         ]
 
 ################################################################################

@@ -1,0 +1,3 @@
+[compconfig]
+heap = 0x30000000
+stack = 0x800000

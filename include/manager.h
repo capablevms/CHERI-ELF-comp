@@ -21,7 +21,7 @@
 #define align_up(x, align) __builtin_align_up(x, align)
 
 extern void *__capability manager_ddc;
-extern struct CompWithEntries **comps;
+extern struct Compartment **comps;
 extern struct Compartment *loaded_comp;
 
 /*******************************************************************************
@@ -30,23 +30,6 @@ extern struct Compartment *loaded_comp;
 
 // Compartment configuration file suffix
 extern const char *comp_config_suffix;
-
-/* Struct representing configuration data for one entry point; this is just
- * information that we expect to appear in the compartment, as given by its
- * compartment configuration file
- */
-struct CompEntryPointDef
-{
-    const char *name;
-    size_t arg_count;
-    char **args_type;
-};
-
-struct CompWithEntries
-{
-    struct Compartment *comp;
-    struct CompEntryPointDef *cep;
-};
 
 void *
 get_next_comp_addr(void);
