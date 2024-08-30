@@ -23,7 +23,7 @@ parse_lib_rela(Elf64_Shdr *, Elf64_Ehdr *, int, struct LibDependency *);
 static void
 parse_lib_dynamic_deps(Elf64_Shdr *, Elf64_Ehdr *, int, struct LibDependency *);
 static void
-find_comp_entry_points(char **, size_t, struct Compartment *);
+map_comp_entry_points(struct Compartment *);
 static void
 resolve_rela_syms(struct Compartment *);
 static struct LibSymSearchResult
@@ -86,8 +86,6 @@ comp_init()
 
     new_comp->libs_count = 0;
     new_comp->libs = NULL;
-    new_comp->entry_point_count = 0;
-    new_comp->entry_points = NULL;
     new_comp->libs_tls_sects = NULL;
 
     new_comp->page_size = sysconf(_SC_PAGESIZE);
@@ -95,26 +93,16 @@ comp_init()
     return new_comp;
 }
 
-/* Comparison function for `struct CompEntryPoint`
- */
-int
-entry_point_cmp(const void *val1, const void *val2)
-{
-    struct CompEntryPoint *ep1 = *(struct CompEntryPoint **) val1;
-    struct CompEntryPoint *ep2 = *(struct CompEntryPoint **) val2;
-    return strcmp(ep1->fn_name, ep2->fn_name);
-}
-
 /* Give a binary ELF file in `filename`, read the ELF data and store it within
  * a `struct Compartment`. At this point, we only read data.
  */
 struct Compartment *
-comp_from_elf(char *filename, char **entry_points, size_t entry_point_count,
-    void *new_comp_base)
+comp_from_elf(char *filename, struct CompConfig *cc)
 {
     struct Compartment *new_comp = comp_init();
-    new_comp->base = new_comp_base;
-    new_comp->mem_top = new_comp_base;
+    new_comp->cc = cc;
+    new_comp->base = cc->base_address; // TODO reuse `cc` base
+    new_comp->mem_top = cc->base_address;
 
     unsigned short libs_to_parse_count = 1;
     unsigned short libs_parsed_count = 0;
@@ -166,12 +154,12 @@ comp_from_elf(char *filename, char **entry_points, size_t entry_point_count,
     }
     free(libs_to_parse);
 
-    assert(entry_points);
-    assert(entry_point_count > 0);
+    assert(cc->entry_points);
+    assert(cc->entry_point_count > 0);
 
     init_comp_scratch_mem(new_comp);
     setup_environ(new_comp);
-    find_comp_entry_points(entry_points, entry_point_count, new_comp);
+    map_comp_entry_points(new_comp);
     resolve_comp_tls_regions(new_comp);
     resolve_rela_syms(new_comp);
 
@@ -253,11 +241,11 @@ comp_map(struct Compartment *to_map)
     }
 
     /* Copy over environ variables
-    //
-    // We need a pointer to an array of string pointers, so we synthetically
-    // create one. We don't expect this pointer to move, as the maximum allowed
-    // size for the `environ` array is already allocated
-    */
+     *
+     * We need a pointer to an array of string pointers, so we synthetically
+     * create one. We don't expect this pointer to move, as the maximum allowed
+     * size for the `environ` array is already allocated
+     */
     *to_map->environ_ptr = (char *) (to_map->environ_ptr + 1);
     to_map->environ_ptr += 1;
 
@@ -328,11 +316,11 @@ comp_exec(
         to_exec->mapped && "Attempting to execute an unmapped compartment.\n");
 
     void *fn = NULL;
-    for (size_t i = 0; i < to_exec->entry_point_count; ++i)
+    for (size_t i = 0; i < to_exec->cc->entry_point_count; ++i)
     {
-        if (!strcmp(fn_name, to_exec->entry_points[i].fn_name))
+        if (!strcmp(fn_name, to_exec->cc->entry_points[i].name))
         {
-            fn = (void *) to_exec->entry_points[i].fn_addr;
+            fn = (void *) to_exec->cc->entry_points[i].comp_addr;
             break;
         }
     }
@@ -414,8 +402,20 @@ comp_clean(struct Compartment *to_clean)
         free(curr_lib_dep->lib_path);
         free(curr_lib_dep);
     }
+    struct CompEntryPointDef curr_cep;
+    for (size_t i = 0; i < to_clean->cc->entry_point_count; ++i)
+    {
+        curr_cep = to_clean->cc->entry_points[i];
+        for (size_t j = 0; j < curr_cep.arg_count; ++j)
+        {
+            free(curr_cep.args_type[j]);
+        }
+        free(curr_cep.args_type);
+        free(curr_cep.name);
+    }
+    free(to_clean->cc->entry_points);
+    free(to_clean->cc);
     free(to_clean->libs);
-    free(to_clean->entry_points);
     if (to_clean->libs_tls_sects)
     {
         free(to_clean->libs_tls_sects);
@@ -896,25 +896,21 @@ parse_lib_dynamic_deps(Elf64_Shdr *dynamic_shdr, Elf64_Ehdr *lib_ehdr,
 }
 
 static void
-find_comp_entry_points(
-    char **entry_points, size_t entry_point_count, struct Compartment *new_comp)
+map_comp_entry_points(struct Compartment *new_comp)
 {
-    new_comp->entry_points
-        = malloc(entry_point_count * sizeof(struct CompEntryPoint));
-    for (size_t i = 0; i < entry_point_count; ++i)
+    for (size_t i = 0; i < new_comp->cc->entry_point_count; ++i)
     {
         // TODO are entry points always in the main loaded library?
         // TODO is the main loaded library always the 0th indexed one?
-        struct LibSymSearchResult found_sym = find_lib_dep_sym_in_comp(
-            entry_points[i], new_comp, 0, STT_FUNC, true);
+        const char *ep_name = new_comp->cc->entry_points[i].name;
+        struct LibSymSearchResult found_sym
+            = find_lib_dep_sym_in_comp(ep_name, new_comp, 0, STT_FUNC, true);
         if (!found_sym.found)
         {
-            errx(1, "Did not find entry point %s!\n", entry_points[i]);
+            errx(1, "Did not find entry point %s!\n", ep_name);
         }
-        struct CompEntryPoint new_entry_point
-            = { entry_points[i], extract_sym_offset(new_comp, found_sym) };
-        new_comp->entry_points[new_comp->entry_point_count] = new_entry_point;
-        new_comp->entry_point_count += 1;
+        new_comp->cc->entry_points[i].comp_addr
+            = extract_sym_offset(new_comp, found_sym);
     }
 }
 
@@ -1161,8 +1157,8 @@ init_comp_scratch_mem(struct Compartment *new_comp)
     new_comp->scratch_mem_base = align_up(
         (char *) new_comp->base + new_comp->size + new_comp->page_size,
         new_comp->page_size);
-    new_comp->scratch_mem_heap_size = 0x800000UL; // TODO
-    new_comp->scratch_mem_stack_size = 0x80000UL; // TODO
+    new_comp->scratch_mem_heap_size = new_comp->cc->heap_size;
+    new_comp->scratch_mem_stack_size = new_comp->cc->stack_size;
     new_comp->scratch_mem_stack_top = align_down(
         (char *) new_comp->scratch_mem_base + new_comp->scratch_mem_stack_size,
         16);

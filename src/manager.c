@@ -2,14 +2,17 @@
 
 // TODO consider moving to a struct or some global thing
 static size_t comps_count = 0;
-struct CompWithEntries **comps;
+struct Compartment **comps;
 struct Compartment *loaded_comp = NULL;
 
 // Variables and functions related to laying compartments in memory
 // TODO make start address configurable
-const uintptr_t comp_start_addr = 0x1000000UL;
-const unsigned short comp_page_interval_count = 2;
+static const uintptr_t comp_start_addr = 0x1000000UL;
+static const unsigned short comp_page_interval_count = 2;
 void *min_next_comp_addr = NULL;
+
+// Name of config file entry for compartment parameters
+static const char *config_file_param_entry = "compconfig";
 
 void *__capability manager_ddc = 0;
 
@@ -24,19 +27,25 @@ extern char **environ;
 
 // Functions
 
+static struct CompConfig *
+parse_compartment_config_file(char *, bool);
+static void
+parse_compartment_config_params(const toml_table_t *, struct CompConfig *);
+static void
+parse_compartment_config(struct CompConfig *);
 static struct CompEntryPointDef *
-parse_compartment_config(char *, size_t *, bool);
-static struct CompEntryPointDef *
-make_default_entry_point();
+make_default_comp_entry_point();
+static struct CompConfig *
+make_default_comp_config();
 static struct CompEntryPointDef
-get_entry_point(char *, struct CompEntryPointDef *, size_t);
+get_entry_point(char *, const struct CompConfig *);
 static void
 prepare_compartment_environ();
 static void *
 prepare_compartment_args(char **args, struct CompEntryPointDef);
 
-static struct CompWithEntries *
-get_comp_with_entries(struct Compartment *);
+static struct Compartment *
+get_comp(struct Compartment *);
 
 // Printing
 static void print_full_cap(uintcap_t);
@@ -101,20 +110,13 @@ register_new_comp(char *filename, bool allow_default_entry)
         prepare_compartment_environ();
     }
 
-    size_t new_comp_ep_count;
-    struct CompEntryPointDef *new_cep = parse_compartment_config(
-        filename, &new_comp_ep_count, allow_default_entry);
+    struct CompConfig *new_cc
+        = parse_compartment_config_file(filename, allow_default_entry);
+    new_cc->base_address = get_next_comp_addr();
 
-    char **ep_names = calloc(new_comp_ep_count, sizeof(char *));
-    for (size_t i = 0; i < new_comp_ep_count; ++i)
-    {
-        ep_names[i] = malloc(strlen(new_cep[i].name) + 1);
-        strcpy(ep_names[i], new_cep[i].name);
-    }
-
-    struct Compartment *new_comp = comp_from_elf(
-        filename, ep_names, new_comp_ep_count, get_next_comp_addr());
+    struct Compartment *new_comp = comp_from_elf(filename, new_cc);
     new_comp->id = comps_count;
+    new_comp->cc = new_cc;
     void *__capability new_comp_ddc
         = cheri_address_set(cheri_ddc_get(), (intptr_t) new_comp->base);
     new_comp_ddc = cheri_bounds_set(
@@ -123,22 +125,13 @@ register_new_comp(char *filename, bool allow_default_entry)
         (char *) new_comp->scratch_mem_stack_top - (char *) new_comp->base);
     new_comp->ddc = new_comp_ddc;
 
-    struct CompWithEntries *new_cwe = malloc(sizeof(struct CompWithEntries));
-    comps = realloc(comps, comps_count * sizeof(struct CompWithEntries *));
-    comps[comps_count] = malloc(sizeof(struct CompWithEntries));
-    comps[comps_count]->comp = new_comp;
-    comps[comps_count]->cep = new_cep;
     comps_count += 1;
+    comps = realloc(comps, comps_count * sizeof(struct Compartment *));
+    comps[comps_count - 1] = new_comp;
 
     min_next_comp_addr = align_up((char *) comp_start_addr + new_comp->size
             + comp_page_interval_count * sysconf(_SC_PAGESIZE),
         sysconf(_SC_PAGESIZE));
-
-    for (size_t i = 0; i < new_comp_ep_count; ++i)
-    {
-        free(ep_names[i]);
-    }
-    free(ep_names);
 
     return new_comp;
 }
@@ -146,9 +139,8 @@ register_new_comp(char *filename, bool allow_default_entry)
 int64_t
 exec_comp(struct Compartment *to_exec, char *entry_fn, char **entry_fn_args)
 {
-    struct CompWithEntries *comp_to_run = get_comp_with_entries(to_exec);
-    struct CompEntryPointDef comp_entry = get_entry_point(
-        entry_fn, comp_to_run->cep, to_exec->entry_point_count);
+    struct CompEntryPointDef comp_entry
+        = get_entry_point(entry_fn, to_exec->cc);
     void *comp_args = prepare_compartment_args(entry_fn_args, comp_entry);
 
     struct Compartment *old_comp = loaded_comp;
@@ -165,7 +157,7 @@ clean_all_comps()
 {
     for (size_t i = 0; i < comps_count; ++i)
     {
-        clean_comp(comps[i]->comp);
+        clean_comp(comps[i]);
     }
     free(comps);
 
@@ -177,19 +169,15 @@ void
 clean_comp(struct Compartment *to_clean)
 {
     comp_clean(to_clean);
-    struct CompWithEntries *cwe = get_comp_with_entries(to_clean);
-    free(cwe->comp);
-    free(cwe->cep);
-    free(cwe);
     // TODO move around memory from `comps`
 }
 
-static struct CompWithEntries *
-get_comp_with_entries(struct Compartment *to_find)
+static struct Compartment *
+get_comp(struct Compartment *to_find)
 {
     for (size_t i = 0; i < comps_count; ++i)
     {
-        if (comps[i]->comp->id == to_find->id)
+        if (comps[i]->id == to_find->id)
         {
             return comps[i];
         }
@@ -203,15 +191,14 @@ manager_find_compartment_by_addr(void *addr)
     size_t i;
     for (i = 0; i < comps_count; ++i)
     {
-        if (comps[i]->comp->base <= addr
-            && (void *) ((char *) comps[i]->comp->base + comps[i]->comp->size)
-                > addr)
+        if (comps[i]->base <= addr
+            && (void *) ((char *) comps[i]->base + comps[i]->size) > addr)
         {
             break;
         }
     }
     assert(i != comps_count);
-    return comps[i]->comp;
+    return comps[i];
 }
 
 struct Compartment *
@@ -220,9 +207,9 @@ manager_find_compartment_by_ddc(void *__capability ddc)
     size_t i;
     for (i = 0; i < comps_count; ++i)
     {
-        if (comps[i]->comp->ddc == ddc)
+        if (comps[i]->ddc == ddc)
         {
-            return comps[i]->comp;
+            return comps[i];
         }
     }
     // TODO improve error message with ddc
@@ -233,7 +220,7 @@ struct Compartment *
 manager_get_compartment_by_id(size_t id)
 {
     assert(id < comps_count);
-    return comps[id]->comp;
+    return comps[id];
 }
 
 void
@@ -265,9 +252,23 @@ prep_config_filename(char *filename)
     return config_filename;
 }
 
-static struct CompEntryPointDef *
-parse_compartment_config(
-    char *comp_filename, size_t *entry_point_count, bool allow_default)
+static void
+parse_compartment_config_params(
+    const toml_table_t *params, struct CompConfig *cc)
+{
+    assert(params);
+
+    toml_datum_t heap_sz_t = toml_int_in(params, "heap");
+    assert(heap_sz_t.ok);
+    cc->heap_size = heap_sz_t.u.i;
+
+    toml_datum_t stack_sz_t = toml_int_in(params, "stack");
+    assert(stack_sz_t.ok);
+    cc->stack_size = stack_sz_t.u.i;
+}
+
+static struct CompConfig *
+parse_compartment_config_file(char *comp_filename, bool allow_default)
 {
     // Get config file name
     char *config_filename = prep_config_filename(comp_filename);
@@ -277,9 +278,11 @@ parse_compartment_config(
     {
         assert(allow_default);
         errno = 0;
-        *entry_point_count = 1;
-        return make_default_entry_point();
+        return make_default_comp_config();
     }
+
+    struct CompConfig *new_cc = malloc(sizeof(struct CompConfig));
+    bool explicit_comp_szs = false;
 
     // Parse config file
     char toml_errbuf[200];
@@ -289,63 +292,69 @@ parse_compartment_config(
     {
         toml_parse_error("TOML table parse error", toml_errbuf);
     }
-    *entry_point_count = toml_table_ntab(tab);
-    struct CompEntryPointDef *entry_points
-        = malloc(*entry_point_count * sizeof(struct CompEntryPointDef));
-    for (size_t i = 0; i < *entry_point_count; ++i)
+    size_t entry_point_count = toml_table_ntab(tab);
+    new_cc->entry_point_count = entry_point_count;
+    toml_table_t *comp_params = toml_table_in(tab, config_file_param_entry);
+    if (comp_params)
     {
-        const char *fname = toml_key_in(tab, i);
-        assert(fname);
-        toml_table_t *curr_func = toml_table_in(tab, fname);
-        assert(curr_func);
-        toml_array_t *func_arg_types = toml_array_in(curr_func, "args_type");
-        assert(func_arg_types);
-        size_t func_arg_count = toml_array_nelem(func_arg_types);
+        parse_compartment_config_params(comp_params, new_cc);
+        new_cc->entry_point_count -= 1;
+    }
 
-        entry_points[i].name = fname;
-        entry_points[i].arg_count = func_arg_count;
-        entry_points[i].args_type = malloc(func_arg_count * sizeof(char *));
-        for (size_t j = 0; j < func_arg_count; ++j)
+    struct CompEntryPointDef *entry_points;
+    if (new_cc->entry_point_count == 0)
+    {
+        entry_points = make_default_comp_entry_point();
+        new_cc->entry_point_count = 1;
+    }
+    else
+    {
+        entry_points = calloc(
+            new_cc->entry_point_count, sizeof(struct CompEntryPointDef));
+        for (size_t i = 0; i < entry_point_count; ++i)
         {
-            toml_datum_t func_arg_type = toml_string_at(func_arg_types, j);
-            entry_points[i].args_type[j]
-                = malloc(strlen(func_arg_type.u.s) + 1);
-            strcpy(entry_points[i].args_type[j], func_arg_type.u.s);
+            const char *fname = toml_key_in(tab, i);
+            assert(fname);
+            if (!strcmp(fname, config_file_param_entry))
+            {
+                break;
+            }
+            toml_table_t *curr_func = toml_table_in(tab, fname);
+            assert(curr_func);
+            toml_array_t *func_arg_types
+                = toml_array_in(curr_func, "args_type");
+            assert(func_arg_types);
+            size_t func_arg_count = toml_array_nelem(func_arg_types);
+
+            entry_points[i].name = malloc(strlen(fname) + 1);
+            strcpy(entry_points[i].name, fname);
+            entry_points[i].arg_count = func_arg_count;
+            entry_points[i].args_type = malloc(func_arg_count * sizeof(char *));
+            entry_points[i].comp_addr = NULL;
+            for (size_t j = 0; j < func_arg_count; ++j)
+            {
+                toml_datum_t func_arg_type = toml_string_at(func_arg_types, j);
+                entry_points[i].args_type[j]
+                    = malloc(strlen(func_arg_type.u.s) + 1);
+                strcpy(entry_points[i].args_type[j], func_arg_type.u.s);
+            }
         }
     }
+    new_cc->entry_points = entry_points;
     fclose(config_fd);
-    return entry_points;
-}
-
-void
-clean_compartment_config(
-    struct CompEntryPointDef *cep, size_t entry_point_count)
-{
-    for (size_t i = 0; i < entry_point_count; ++i)
-    {
-        free((void *) cep[i].name);
-        for (size_t j = 0; j < cep[i].arg_count; ++j)
-        {
-            free(cep[i].args_type[j]);
-        }
-        free(cep[i].args_type);
-    }
-    free(cep);
+    return new_cc;
 }
 
 static struct CompEntryPointDef
-get_entry_point(
-    char *entry_point_fn, struct CompEntryPointDef *ceps, size_t cep_count)
+get_entry_point(char *entry_point_fn, const struct CompConfig *cc)
 {
     struct CompEntryPointDef curr_ep;
-    while (cep_count != 0)
+    for (size_t i = 0; i < cc->entry_point_count; ++i)
     {
-        curr_ep = ceps[cep_count - 1];
-        if (!strcmp(curr_ep.name, entry_point_fn))
+        if (!strcmp(cc->entry_points[i].name, entry_point_fn))
         {
-            return curr_ep;
+            return cc->entry_points[i];
         }
-        cep_count -= 1;
     }
     errx(1, "Did not find entry point for function %s!\n", entry_point_fn);
 }
@@ -417,7 +426,7 @@ prepare_compartment_args(char **args, struct CompEntryPointDef cep)
 }
 
 static struct CompEntryPointDef *
-make_default_entry_point()
+make_default_comp_entry_point()
 {
     struct CompEntryPointDef *cep = malloc(sizeof(struct CompEntryPointDef));
     cep->name = malloc(strlen("main") + 1);
@@ -425,6 +434,18 @@ make_default_entry_point()
     cep->arg_count = 0;
     cep->args_type = NULL;
     return cep;
+}
+
+static struct CompConfig *
+make_default_comp_config()
+{
+    struct CompConfig *cc = malloc(sizeof(struct CompConfig));
+    cc->heap_size = DEFAULT_COMP_HEAP_SZ;
+    cc->stack_size = DEFAULT_COMP_STACK_SZ;
+    cc->entry_points = make_default_comp_entry_point();
+    cc->entry_point_count = 1;
+    cc->base_address = NULL;
+    return cc;
 }
 
 static void
@@ -462,8 +483,6 @@ print_comp(struct Compartment *to_print)
         "- scratch_mem_stack_size : 0x%zx\n", to_print->scratch_mem_stack_size);
 
     printf("- libs_count : %lu\n", to_print->libs_count);
-    printf("- entry_point_count : %lu\n", to_print->entry_point_count);
-    // TODO entry_points
     printf("- tls_lookup_func : %p\n", to_print->tls_lookup_func);
     printf("- total_tls_size : %#zx\n", to_print->total_tls_size);
     printf("- libs_tls_sects :\n");
