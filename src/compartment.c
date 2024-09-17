@@ -23,17 +23,19 @@ parse_lib_rela(Elf64_Shdr *, Elf64_Ehdr *, int, struct LibDependency *);
 static void
 parse_lib_dynamic_deps(Elf64_Shdr *, Elf64_Ehdr *, int, struct LibDependency *);
 static void
+update_comp_syms(struct Compartment *, const lib_symbol_list *, const size_t);
+static void
 map_comp_entry_points(struct Compartment *);
 static void
 resolve_rela_syms(struct Compartment *);
-static struct LibSymSearchResult
-find_lib_dep_sym_in_comp(const char *, struct Compartment *, const size_t,
-    const unsigned short, bool);
-static struct LibSymSearchResult
-find_lib_dep_sym_in_lib(
-    const char *, struct Compartment *, const size_t, const unsigned short);
+static bool
+check_lib_dep_sym(lib_symbol *, const unsigned short);
 static void *
-extract_sym_offset(struct Compartment *, struct LibSymSearchResult);
+eval_sym_offset(struct Compartment *, const comp_symbol *);
+static void *
+eval_lib_sym_offset(struct Compartment *, const size_t, const lib_symbol *);
+static void *
+eval_sym_tls_offset(struct Compartment *, const comp_symbol *);
 
 static ssize_t
 do_pread(int, void *, size_t, off_t);
@@ -87,6 +89,7 @@ comp_init()
     new_comp->libs_count = 0;
     new_comp->libs = NULL;
     new_comp->libs_tls_sects = NULL;
+    new_comp->comp_syms = comp_syms_init();
 
     new_comp->page_size = sysconf(_SC_PAGESIZE);
 
@@ -119,16 +122,11 @@ comp_from_elf(char *filename, struct CompConfig *cc)
         // Get `tls_lookup_func` if we parsed `comp_utils.so`
         if (!strcmp(parsed_lib->lib_name, comp_utils_soname))
         {
-            for (size_t i = 0; i < parsed_lib->lib_syms_count; ++i)
-            {
-                if (!strcmp(parsed_lib->lib_syms[i].sym_name, tls_rtld_dropin))
-                {
-                    new_comp->tls_lookup_func
-                        = (char *) parsed_lib->lib_syms[i].sym_offset
-                        + (intptr_t) parsed_lib->lib_mem_base;
-                    break;
-                }
-            }
+            new_comp->tls_lookup_func
+                = (char *) (lib_syms_search(
+                      tls_rtld_dropin, parsed_lib->lib_syms)
+                                ->sym_offset)
+                + (intptr_t) parsed_lib->lib_mem_base;
             assert(new_comp->tls_lookup_func);
         }
 
@@ -375,11 +373,7 @@ comp_clean(struct Compartment *to_clean)
         free(curr_lib_dep->lib_segs);
 
         // Clean library symbol data
-        for (j = 0; j < curr_lib_dep->lib_syms_count; ++j)
-        {
-            free(curr_lib_dep->lib_syms[j].sym_name);
-        }
-        free(curr_lib_dep->lib_syms);
+        lib_syms_clean_deep(curr_lib_dep->lib_syms);
 
         // Clear library dependency names
         for (j = 0; j < curr_lib_dep->lib_dep_count; ++j)
@@ -416,6 +410,7 @@ comp_clean(struct Compartment *to_clean)
     free(to_clean->cc->entry_points);
     free(to_clean->cc);
     free(to_clean->libs);
+    comp_syms_clean_deep(to_clean->comp_syms);
     if (to_clean->libs_tls_sects)
     {
         free(to_clean->libs_tls_sects);
@@ -479,7 +474,6 @@ parse_lib_file(char *lib_name, struct Compartment *new_comp)
     new_lib->lib_segs_size = 0;
     new_lib->lib_segs = NULL;
 
-    new_lib->lib_syms_count = 0;
     new_lib->lib_syms = NULL;
 
     new_lib->lib_dep_count = 0;
@@ -571,6 +565,7 @@ parse_lib_file(char *lib_name, struct Compartment *new_comp)
     new_comp->libs = realloc(
         new_comp->libs, new_comp->libs_count * sizeof(struct LibDependency *));
     new_comp->libs[new_comp->libs_count - 1] = new_lib;
+    update_comp_syms(new_comp, new_lib->lib_syms, new_comp->libs_count - 1);
 
     free(shstrtab);
 
@@ -651,13 +646,13 @@ parse_lib_symtb(Elf64_Shdr *symtb_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
     char *str_tb = malloc(link_shdr.sh_size);
     do_pread(lib_fd, str_tb, link_shdr.sh_size, link_shdr.sh_offset);
 
-    lib_dep->lib_syms_count = symtb_shdr->sh_size / sizeof(Elf64_Sym);
+    size_t lib_syms_count = symtb_shdr->sh_size / sizeof(Elf64_Sym);
     size_t actual_syms = 0;
-    struct LibDependencySymbol *ld_syms
-        = malloc(lib_dep->lib_syms_count * sizeof(struct LibDependencySymbol));
 
     Elf64_Sym curr_sym;
-    for (size_t j = 0; j < lib_dep->lib_syms_count; ++j)
+    lib_symbol_list *ld_syms = lib_syms_init();
+    lib_symbol *to_insert;
+    for (size_t j = 0; j < lib_syms_count; ++j)
     {
         curr_sym = sym_tb[j];
         // TODO currently ignore symbols of unspecified type
@@ -666,18 +661,16 @@ parse_lib_symtb(Elf64_Shdr *symtb_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
             continue;
         }
 
-        ld_syms[actual_syms].sym_offset = (void *) curr_sym.st_value;
+        to_insert = malloc(sizeof(lib_symbol));
+        to_insert->sym_offset = (void *) curr_sym.st_value;
         char *sym_name = &str_tb[curr_sym.st_name];
-        ld_syms[actual_syms].sym_name = malloc(strlen(sym_name) + 1);
-        strcpy(ld_syms[actual_syms].sym_name, sym_name);
-        ld_syms[actual_syms].sym_type = ELF64_ST_TYPE(curr_sym.st_info);
-        ld_syms[actual_syms].sym_bind = ELF64_ST_BIND(curr_sym.st_info);
-        ld_syms[actual_syms].sym_shndx = curr_sym.st_shndx;
-        actual_syms += 1;
+        to_insert->sym_name = malloc(strlen(sym_name) + 1);
+        strcpy(to_insert->sym_name, sym_name);
+        to_insert->sym_type = ELF64_ST_TYPE(curr_sym.st_info);
+        to_insert->sym_bind = ELF64_ST_BIND(curr_sym.st_info);
+        to_insert->sym_shndx = curr_sym.st_shndx;
+        lib_syms_insert(to_insert, ld_syms);
     }
-    ld_syms
-        = realloc(ld_syms, actual_syms * sizeof(struct LibDependencySymbol));
-    lib_dep->lib_syms_count = actual_syms;
     lib_dep->lib_syms = ld_syms;
 
     free(sym_tb);
@@ -896,21 +889,50 @@ parse_lib_dynamic_deps(Elf64_Shdr *dynamic_shdr, Elf64_Ehdr *lib_ehdr,
 }
 
 static void
+update_comp_syms(struct Compartment *comp, const lib_symbol_list *lib_dep_syms,
+    const size_t lib_idx)
+{
+    comp_symbol *new_cs;
+    for (size_t i = 0; i < lib_dep_syms->data_count; ++i)
+    {
+        // We do not want to record non-local symbols
+        if (lib_dep_syms->data[i]->sym_shndx == 0)
+        {
+            continue;
+        }
+        new_cs = malloc(sizeof(comp_symbol));
+        new_cs->sym_ref = lib_dep_syms->data[i];
+        new_cs->sym_lib_idx = lib_idx;
+        comp_syms_insert(new_cs, comp->comp_syms);
+    }
+}
+
+static void
 map_comp_entry_points(struct Compartment *new_comp)
 {
     for (size_t i = 0; i < new_comp->cc->entry_point_count; ++i)
     {
         // TODO are entry points always in the main loaded library?
         // TODO is the main loaded library always the 0th indexed one?
+        const size_t lib_idx = 0;
         const char *ep_name = new_comp->cc->entry_points[i].name;
-        struct LibSymSearchResult found_sym
-            = find_lib_dep_sym_in_comp(ep_name, new_comp, 0, STT_FUNC, true);
-        if (!found_sym.found)
+        lib_symbol_list *candidates
+            = lib_syms_find_all(ep_name, new_comp->libs[lib_idx]->lib_syms);
+        size_t j = 0;
+        for (; j < candidates->data_count; ++j)
+        {
+            if (check_lib_dep_sym(candidates->data[j], STT_FUNC))
+            {
+                break;
+            }
+        }
+        if (j == candidates->data_count)
         {
             errx(1, "Did not find entry point %s!\n", ep_name);
         }
         new_comp->cc->entry_points[i].comp_addr
-            = extract_sym_offset(new_comp, found_sym);
+            = eval_lib_sym_offset(new_comp, lib_idx, candidates->data[j]);
+        free(candidates);
     }
 }
 
@@ -920,7 +942,8 @@ resolve_rela_syms(struct Compartment *new_comp)
     // Find all symbols for eager relocation mapping
     size_t prev_tls_secs_size = 0;
     struct LibRelaMapping *curr_rela_map;
-    struct LibSymSearchResult found_sym;
+    comp_symbol_list *candidate_syms;
+    comp_symbol *chosen_sym;
     for (size_t i = 0; i < new_comp->libs_count; ++i)
     {
         for (size_t j = 0; j < new_comp->libs[i]->rela_maps_count; ++j)
@@ -958,59 +981,84 @@ resolve_rela_syms(struct Compartment *new_comp)
                 continue;
             }
 
+            candidate_syms = comp_syms_find_all(
+                curr_rela_map->rela_name, new_comp->comp_syms);
+
+            if (candidate_syms->data_count == 0)
+            {
+                if (curr_rela_map->rela_sym_bind == STB_WEAK)
+                {
+                    // TODO Hack to suppress weak `libc` relocations
+                    const char *lib_to_suppress = "libc.so";
+                    if (strlen(new_comp->libs[i]->lib_name)
+                            > strlen(lib_to_suppress)
+                        && strncmp(new_comp->libs[i]->lib_name, lib_to_suppress,
+                            strlen(lib_to_suppress)))
+                    {
+                        warnx("Did not find WEAK symbol %s of type %hu (idx "
+                              "%zu in library %s (idx %zu)) - execution "
+                              "*might* fault.",
+                            curr_rela_map->rela_name,
+                            curr_rela_map->rela_sym_type, j,
+                            new_comp->libs[i]->lib_name, i);
+                    }
+                    continue;
+                }
+
+                errx(1,
+                    "Did not find symbol %s of type %hu (idx %zu in "
+                    "library %s "
+                    "(idx %zu))!",
+                    curr_rela_map->rela_name, curr_rela_map->rela_sym_type, j,
+                    new_comp->libs[i]->lib_name, i);
+            }
+            // TODO caching
+
             // Prioritise looking for weak symbols in libraries outside the
             // source library, even if they are defined
             if (curr_rela_map->rela_sym_bind == STB_WEAK)
             {
-                found_sym = find_lib_dep_sym_in_comp(curr_rela_map->rela_name,
-                    new_comp, i, curr_rela_map->rela_sym_type, false);
-                if (!found_sym.found)
+                int fallback_sym_id = -1;
+                size_t k = 0;
+                for (; k < candidate_syms->data_count; ++k)
                 {
-                    found_sym
-                        = find_lib_dep_sym_in_comp(curr_rela_map->rela_name,
-                            new_comp, i, curr_rela_map->rela_sym_type, true);
+                    if (!check_lib_dep_sym(candidate_syms->data[k]->sym_ref,
+                            curr_rela_map->rela_sym_type))
+                    {
+                        continue;
+                    }
+                    if (candidate_syms->data[k]->sym_lib_idx != i)
+                    {
+                        chosen_sym = candidate_syms->data[k];
+                        break;
+                    }
+                    else
+                    {
+                        fallback_sym_id = k;
+                    }
+                }
+                if (k == candidate_syms->data_count)
+                {
+                    assert(fallback_sym_id != -1);
+                    chosen_sym = candidate_syms->data[fallback_sym_id];
                 }
             }
             else
             {
-                found_sym = find_lib_dep_sym_in_comp(curr_rela_map->rela_name,
-                    new_comp, i, curr_rela_map->rela_sym_type,
-                    curr_rela_map->rela_sym_shndx != 0);
+                // TODO is there a better choice?
+                chosen_sym = candidate_syms->data[0];
             }
-
-            if (!found_sym.found)
-            {
-                if (curr_rela_map->rela_sym_bind == STB_WEAK)
-                {
-                    warnx("Did not find WEAK symbol %s of type %hu (idx %zu in "
-                          "library %s (idx %zu)) - execution *might* fault.",
-                        curr_rela_map->rela_name, curr_rela_map->rela_sym_type,
-                        j, new_comp->libs[i]->lib_name, i);
-                    continue;
-                }
-                else
-                {
-                    errx(1,
-                        "Did not find symbol %s of type %hu (idx %zu in "
-                        "library %s "
-                        "(idx %zu))!",
-                        curr_rela_map->rela_name, curr_rela_map->rela_sym_type,
-                        j, new_comp->libs[i]->lib_name, i);
-                }
-            }
+            comp_syms_clean(candidate_syms);
 
             if (curr_rela_map->rela_sym_type == STT_TLS)
             {
                 curr_rela_map->target_func_address
-                    = (char *) new_comp->libs[found_sym.lib_idx]
-                          ->lib_syms[found_sym.sym_idx]
-                          .sym_offset
-                    + new_comp->libs[found_sym.lib_idx]->tls_offset;
+                    = eval_sym_tls_offset(new_comp, chosen_sym);
             }
             else
             {
                 curr_rela_map->target_func_address
-                    = extract_sym_offset(new_comp, found_sym);
+                    = eval_sym_offset(new_comp, chosen_sym);
             }
         }
         prev_tls_secs_size += new_comp->libs[i]->tls_sec_size;
@@ -1033,84 +1081,37 @@ do_pread(int fd, void *buf, size_t count, off_t offset)
 }
 
 static void *
-extract_sym_offset(struct Compartment *comp, struct LibSymSearchResult res)
+eval_sym_offset(struct Compartment *comp, const comp_symbol *sym)
 {
-    return (char *) comp->libs[res.lib_idx]->lib_mem_base
-        + (intptr_t) comp->libs[res.lib_idx]->lib_syms[res.sym_idx].sym_offset;
+    return (char *) comp->libs[sym->sym_lib_idx]->lib_mem_base
+        + (intptr_t) sym->sym_ref->sym_offset;
 }
 
-static struct LibSymSearchResult
-find_lib_dep_sym_in_comp(const char *to_find,
-    struct Compartment *comp_to_search, const size_t source_lib_idx,
-    const unsigned short sym_type, bool in_lib)
+static void *
+eval_lib_sym_offset(
+    struct Compartment *comp, const size_t lib_idx, const lib_symbol *sym)
 {
-    struct LibSymSearchResult res = { -1, -1, false };
-    if (in_lib)
-    {
-        res = find_lib_dep_sym_in_lib(
-            to_find, comp_to_search, source_lib_idx, sym_type);
-    }
-    else
-    {
-        for (size_t i = 0; i < comp_to_search->libs_count; ++i)
-        {
-            if (i == source_lib_idx)
-            {
-                continue;
-            }
-            res = find_lib_dep_sym_in_lib(to_find, comp_to_search, i, sym_type);
-            if (res.found)
-            {
-                break;
-            }
-        }
-    }
-    return res;
+    return (char *) comp->libs[lib_idx]->lib_mem_base
+        + (intptr_t) sym->sym_offset;
 }
 
-static struct LibSymSearchResult
-find_lib_dep_sym_in_lib(const char *to_find, struct Compartment *comp_to_search,
-    const size_t lib_idx, const unsigned short sym_type)
+static void *
+eval_sym_tls_offset(struct Compartment *comp, const comp_symbol *sym)
 {
-    const size_t syms_count = comp_to_search->libs[lib_idx]->lib_syms_count;
-    const struct LibDependencySymbol *syms
-        = comp_to_search->libs[lib_idx]->lib_syms;
-    struct LibSymSearchResult res = { -1, -1, false };
-    for (size_t i = 0; i < syms_count; ++i)
-    {
-        struct LibDependencySymbol curr_sym = syms[i];
+    return (char *) sym->sym_ref->sym_offset
+        + comp->libs[sym->sym_lib_idx]->tls_offset;
+}
 
-        // Ignore no-named symbols
-        if (!curr_sym.sym_name)
-        {
-            continue;
-        }
-
-        // We build up the conditions needed to find a valid symbol to be
-        // relocated against in `cond`
-        //
+static bool
+check_lib_dep_sym(lib_symbol *sym, const unsigned short sym_type)
+{
+    return
         // Ignore `LOCAL` bind symbols - they cannot be relocated against
-        bool cond = curr_sym.sym_bind != STB_LOCAL;
-
+        sym->sym_bind != STB_LOCAL &&
         // Check symbol is indeed local, not another external reference
-        cond = cond && curr_sym.sym_shndx != 0;
-
-        // Check symbol name matches
-        cond = cond && !strcmp(to_find, curr_sym.sym_name);
-
+        sym->sym_shndx != 0 &&
         // Check symbol type matches
-        cond = cond && curr_sym.sym_type == sym_type;
-
-        // If all conditions pass, we found a valid symbol to relocate against
-        if (cond)
-        {
-            res = (struct LibSymSearchResult) {
-                .lib_idx = lib_idx, .sym_idx = i, .found = true
-            };
-            break;
-        }
-    }
-    return res;
+        sym->sym_type == sym_type;
 }
 
 static char *
@@ -1280,7 +1281,7 @@ print_lib_dep(struct LibDependency *lib_dep)
         print_lib_dep_seg(&lib_dep->lib_segs[i]);
     }
 
-    printf("- lib_syms_count : %lu\n", lib_dep->lib_syms_count);
+    // TODO lib_syms
 
     printf("- lib_dep_count : %hu\n", lib_dep->lib_dep_count);
     printf("- lib_dep_names :\n");

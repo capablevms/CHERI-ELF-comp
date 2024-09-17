@@ -8,7 +8,6 @@
 #include <fcntl.h>
 #include <fts.h>
 #include <limits.h>
-#include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,6 +16,8 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#include "symbols.h"
 
 #include "cheriintrin.h"
 
@@ -94,28 +95,6 @@ struct LibRelaMapping
     uint16_t rela_sym_shndx; // section index of underlying symbol
 };
 
-/* Struct representing a symbol entry of a dependency library
- */
-struct LibDependencySymbol
-{
-    char *sym_name;
-    void *sym_offset;
-    unsigned short sym_type;
-    unsigned short sym_bind;
-    uint16_t sym_shndx;
-};
-
-/* Struct representing the result of searching for a library symbol in a
- * compartment; for simplicity, we store the respective library index within
- * the compartment, and symbol index within the library's symbols
- */
-struct LibSymSearchResult
-{
-    unsigned short lib_idx;
-    unsigned short sym_idx;
-    bool found;
-};
-
 /**
  * Struct representing a library dependency for one of our given compartments
  */
@@ -131,8 +110,7 @@ struct LibDependency
     struct SegmentMap *lib_segs;
 
     // Symbols within this library
-    size_t lib_syms_count;
-    struct LibDependencySymbol *lib_syms;
+    lib_symbol_list *lib_syms;
 
     // Library dependencies for this library
     unsigned short lib_dep_count;
@@ -224,6 +202,7 @@ struct Compartment
     void *tls_lookup_func;
     size_t total_tls_size;
     struct TLSDesc *libs_tls_sects;
+    comp_symbol_list *comp_syms;
 
     // Hardware info - maybe move
     size_t page_size;
