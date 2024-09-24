@@ -23,8 +23,6 @@ parse_lib_rela(Elf64_Shdr *, Elf64_Ehdr *, int, struct LibDependency *);
 static void
 parse_lib_dynamic_deps(Elf64_Shdr *, Elf64_Ehdr *, int, struct LibDependency *);
 static void
-update_comp_syms(struct Compartment *, const lib_symbol_list *, const size_t);
-static void
 map_comp_entry_points(struct Compartment *);
 static void
 resolve_rela_syms(struct Compartment *);
@@ -438,7 +436,7 @@ parse_lib_file(char *lib_name, struct Compartment *new_comp)
         lib_fd = open(lib_path, O_RDONLY);
         if (lib_fd == -1)
         {
-            errx(1, "Error opening compartment file  %s!\n", lib_name);
+            errx(1, "Error opening compartment file  %s!", lib_name);
         }
     }
 
@@ -449,7 +447,7 @@ parse_lib_file(char *lib_name, struct Compartment *new_comp)
     {
         errx(1,
             "Error parsing `%s` - only supporting ELFs of type DYN (shared "
-            "object files)!\n",
+            "object files)!",
             lib_path);
     }
 
@@ -565,7 +563,8 @@ parse_lib_file(char *lib_name, struct Compartment *new_comp)
     new_comp->libs = realloc(
         new_comp->libs, new_comp->libs_count * sizeof(struct LibDependency *));
     new_comp->libs[new_comp->libs_count - 1] = new_lib;
-    update_comp_syms(new_comp, new_lib->lib_syms, new_comp->libs_count - 1);
+    update_comp_syms(
+        new_comp->comp_syms, new_lib->lib_syms, new_comp->libs_count - 1);
 
     free(shstrtab);
 
@@ -889,25 +888,6 @@ parse_lib_dynamic_deps(Elf64_Shdr *dynamic_shdr, Elf64_Ehdr *lib_ehdr,
 }
 
 static void
-update_comp_syms(struct Compartment *comp, const lib_symbol_list *lib_dep_syms,
-    const size_t lib_idx)
-{
-    comp_symbol *new_cs;
-    for (size_t i = 0; i < lib_dep_syms->data_count; ++i)
-    {
-        // We do not want to record non-local symbols
-        if (lib_dep_syms->data[i]->sym_shndx == 0)
-        {
-            continue;
-        }
-        new_cs = malloc(sizeof(comp_symbol));
-        new_cs->sym_ref = lib_dep_syms->data[i];
-        new_cs->sym_lib_idx = lib_idx;
-        comp_syms_insert(new_cs, comp->comp_syms);
-    }
-}
-
-static void
 map_comp_entry_points(struct Compartment *new_comp)
 {
     for (size_t i = 0; i < new_comp->cc->entry_point_count; ++i)
@@ -916,22 +896,23 @@ map_comp_entry_points(struct Compartment *new_comp)
         // TODO is the main loaded library always the 0th indexed one?
         const size_t lib_idx = 0;
         const char *ep_name = new_comp->cc->entry_points[i].name;
-        lib_symbol_list *candidates
+        lib_symbol **candidates
             = lib_syms_find_all(ep_name, new_comp->libs[lib_idx]->lib_syms);
         size_t j = 0;
-        for (; j < candidates->data_count; ++j)
+        while (candidates)
         {
-            if (check_lib_dep_sym(candidates->data[j], STT_FUNC))
+            if (check_lib_dep_sym(*candidates, STT_FUNC))
             {
                 break;
             }
+            *candidates += sizeof(lib_symbol *);
         }
-        if (j == candidates->data_count)
+        if (!candidates)
         {
             errx(1, "Did not find entry point %s!\n", ep_name);
         }
         new_comp->cc->entry_points[i].comp_addr
-            = eval_lib_sym_offset(new_comp, lib_idx, candidates->data[j]);
+            = eval_lib_sym_offset(new_comp, lib_idx, *candidates);
         free(candidates);
     }
 }
@@ -942,13 +923,14 @@ resolve_rela_syms(struct Compartment *new_comp)
     // Find all symbols for eager relocation mapping
     size_t prev_tls_secs_size = 0;
     struct LibRelaMapping *curr_rela_map;
-    comp_symbol_list *candidate_syms;
+    comp_symbol **candidate_syms;
     comp_symbol *chosen_sym;
     for (size_t i = 0; i < new_comp->libs_count; ++i)
     {
         for (size_t j = 0; j < new_comp->libs[i]->rela_maps_count; ++j)
         {
             curr_rela_map = &new_comp->libs[i]->rela_maps[j];
+            chosen_sym = NULL;
 
             // This is a TLS variable that exists in the current library; we
             // just allocate the space for it
@@ -984,7 +966,7 @@ resolve_rela_syms(struct Compartment *new_comp)
             candidate_syms = comp_syms_find_all(
                 curr_rela_map->rela_name, new_comp->comp_syms);
 
-            if (candidate_syms->data_count == 0)
+            if (*candidate_syms == NULL)
             {
                 if (curr_rela_map->rela_sym_bind == STB_WEAK)
                 {
@@ -1012,43 +994,42 @@ resolve_rela_syms(struct Compartment *new_comp)
                     curr_rela_map->rela_name, curr_rela_map->rela_sym_type, j,
                     new_comp->libs[i]->lib_name, i);
             }
-            // TODO caching
 
             // Prioritise looking for weak symbols in libraries outside the
             // source library, even if they are defined
             if (curr_rela_map->rela_sym_bind == STB_WEAK)
             {
-                int fallback_sym_id = -1;
-                size_t k = 0;
-                for (; k < candidate_syms->data_count; ++k)
+                comp_symbol *fallback_sym = NULL;
+                while (*candidate_syms)
                 {
-                    if (!check_lib_dep_sym(candidate_syms->data[k]->sym_ref,
+                    if (check_lib_dep_sym((*candidate_syms)->sym_ref,
                             curr_rela_map->rela_sym_type))
                     {
-                        continue;
+                        if ((*candidate_syms)->sym_lib_idx != i)
+                        {
+                            chosen_sym = *candidate_syms;
+                            break;
+                        }
+                        else if (!fallback_sym)
+                        {
+                            fallback_sym = *candidate_syms;
+                        }
                     }
-                    if (candidate_syms->data[k]->sym_lib_idx != i)
-                    {
-                        chosen_sym = candidate_syms->data[k];
-                        break;
-                    }
-                    else
-                    {
-                        fallback_sym_id = k;
-                    }
+                    candidate_syms += 1;
                 }
-                if (k == candidate_syms->data_count)
+                if (!chosen_sym)
                 {
-                    assert(fallback_sym_id != -1);
-                    chosen_sym = candidate_syms->data[fallback_sym_id];
+                    assert(fallback_sym);
+                    chosen_sym = fallback_sym;
                 }
             }
             else
             {
+                // Choose the first candidate
                 // TODO is there a better choice?
-                chosen_sym = candidate_syms->data[0];
+                chosen_sym = *candidate_syms;
             }
-            comp_syms_clean(candidate_syms);
+            free(candidate_syms);
 
             if (curr_rela_map->rela_sym_type == STT_TLS)
             {

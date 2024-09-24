@@ -15,13 +15,16 @@ ${CLANG_FORMAT_BIN} --dry-run -Werror ${CLANG_FORMAT_SOURCES[*]}
 # Update submodules
 git submodule update --init
 
-# Apply lua patch
+# Apply `lua` patch
 lua_dir="$src_dir/third-party/lua"
 patch -d $lua_dir -i ../lua.patch
 
-# Apply toml patch
+# Apply `toml` patch
 toml_dir="$src_dir/third-party/tomlc99"
 patch -d $toml_dir -i ../tomlc99.patch
+
+# Link `tommyds` Makefile appropriately
+ln -s $(pwd)/third-party/tommyds-makefile $(pwd)/third-party/tommyds/tommyds/Makefile
 
 # Prepare python virtual env
 export PATH=$PATH:$HOME/.local/bin

@@ -1,0 +1,10 @@
+CFLAGS += --shared -fPIC
+
+TARGET = libtommyds.a
+SOURCES = tommy.c
+OBJECTS = $(SOURCES:.c=.o)
+
+all: $(TARGET)
+
+$(TARGET): $(OBJECTS)
+	ar rcs $@ $^

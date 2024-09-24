@@ -1,14 +1,16 @@
 # Manager executables
+set(BIN_INCLUDE_DIRS ${INCLUDE_DIR} ${TOML_INCLUDE_DIR} ${TOMMYDS_DIR})
+
 add_executable(manager_call
     ${TEST_DIR}/manager_caller.c
     )
-target_include_directories(manager_call PUBLIC ${INCLUDE_DIR} ${TOML_INCLUDE_DIR})
+target_include_directories(manager_call PUBLIC ${BIN_INCLUDE_DIRS})
 target_link_libraries(manager_call PUBLIC chcomp)
 
 add_executable(manager_args
     ${TEST_DIR}/manager_arg_passer.c
     )
-target_include_directories(manager_args PUBLIC ${INCLUDE_DIR} ${TOML_INCLUDE_DIR})
+target_include_directories(manager_args PUBLIC ${BIN_INCLUDE_DIRS})
 target_link_libraries(manager_args PUBLIC chcomp)
 
 # Test properties
@@ -49,7 +51,7 @@ function(new_func_test test_name)
         ${test_name}.c)
     target_link_libraries(${test_name} PRIVATE chcomp)
     target_include_directories(${test_name} PRIVATE
-        ${CMAKE_SOURCE_DIR}/src ${INCLUDE_DIR} ${TOML_INCLUDE_DIR})
+        ${CMAKE_SOURCE_DIR}/src ${BIN_INCLUDE_DIRS})
 endfunction()
 
 # Compartment tests
