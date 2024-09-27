@@ -17,7 +17,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "symbols.h"
+// TODO consider re-organizing
+#include "symbols_comp.h"
 
 #include "cheriintrin.h"
 

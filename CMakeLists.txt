@@ -48,11 +48,32 @@ add_custom_target(
     toml
     DEPENDS ${TOML_LIB_PATH}
 )
-add_library(tomllib SHARED IMPORTED)
+add_library(tomllib STATIC IMPORTED)
 add_dependencies(tomllib toml)
 set_target_properties(tomllib
     PROPERTIES
     IMPORTED_LOCATION ${TOML_LIB_PATH}
+)
+
+# Build tommyds
+set(TOMMYDS_DIR ${CMAKE_SOURCE_DIR}/third-party/tommyds/tommyds)
+set(TOMMYDS_LIB ${CMAKE_SOURCE_DIR}/third-party/tommyds/tommyds/libtommyds.a)
+
+add_custom_command(
+    OUTPUT ${TOMMYDS_LIB}
+    COMMAND make
+    WORKING_DIRECTORY ${TOMMYDS_DIR}
+)
+
+add_custom_target(
+    tommyds
+    DEPENDS ${TOMMYDS_LIB}
+)
+add_library(tommydslib STATIC IMPORTED)
+add_dependencies(tommydslib tommyds)
+set_target_properties(tommydslib
+    PROPERTIES
+    IMPORTED_LOCATION ${TOMMYDS_LIB}
 )
 
 # Build sources

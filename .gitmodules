@@ -4,3 +4,6 @@
 [submodule "third-party/tomlc99"]
 	path = third-party/tomlc99
 	url = https://github.com/cktan/tomlc99
+[submodule "third-party/tommyds"]
+	path = third-party/tommyds
+	url = https://github.com/amadvance/tommyds.git
