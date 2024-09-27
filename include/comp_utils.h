@@ -8,7 +8,11 @@
 #include <string.h>
 #include <sys/mman.h>
 
+#ifdef __CHERI__
 #include "cheriintrin.h"
+#else
+#include "linux_harness.h"
+#endif
 
 void *malloc(size_t);
 void

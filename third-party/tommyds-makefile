@@ -8,3 +8,6 @@ all: $(TARGET)
 
 $(TARGET): $(OBJECTS)
 	ar rcs $@ $^
+
+clean:
+	rm $(TARGET) $(OBJECTS)

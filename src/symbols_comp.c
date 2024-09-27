@@ -74,10 +74,6 @@ comp_syms_search(const char *to_find, comp_symbol_list *list)
 {
     comp_symbol *found = tommy_hashtable_search(
         list, comp_syms_compare, to_find, hashtable_hash(to_find));
-    if (!found)
-    {
-        errx(1, "Did not find symbol %s!\n", to_find);
-    }
     return found;
 }
 
@@ -85,6 +81,11 @@ comp_symbol **
 comp_syms_find_all(const char *to_find, comp_symbol_list *list)
 {
     comp_symbol **res = calloc(MAX_FIND_ALL_COUNT, sizeof(comp_symbol *));
+    if (!res)
+    {
+        err(1,
+            "Error allocating temporary memory for compartment symbol lookup!");
+    }
     unsigned int res_sz = 0;
     tommy_hashtable_node *curr_node
         = tommy_hashtable_bucket(list, hashtable_hash(to_find));
@@ -101,6 +102,12 @@ comp_syms_find_all(const char *to_find, comp_symbol_list *list)
     assert(res_sz < MAX_FIND_ALL_COUNT - 1);
     res = realloc(res, (res_sz + 1) * sizeof(comp_symbol *));
     return res;
+}
+
+void
+comp_syms_print(comp_symbol_list *list)
+{
+    tommy_hashtable_foreach(list, comp_syms_print_one);
 }
 
 /*******************************************************************************

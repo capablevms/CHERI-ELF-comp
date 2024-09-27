@@ -29,6 +29,8 @@ comp_symbol *
 comp_syms_search(const char *, comp_symbol_list *);
 comp_symbol **
 comp_syms_find_all(const char *, comp_symbol_list *);
+void
+comp_syms_print(comp_symbol_list *);
 
 void
 update_comp_syms(comp_symbol_list *, lib_symbol_list *, const size_t);
