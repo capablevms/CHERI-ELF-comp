@@ -213,6 +213,10 @@ tls_lookup_stub()
 {
     // Get TLS index
     // TODO works only for one TLS region
+#ifdef __CHERI__
     asm("ldr x0, [x0, #8]" : :);
+#else
+    asm("lea -0x8(%%rbp), %%rcx" : :);
+#endif
     return;
 }

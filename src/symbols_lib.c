@@ -86,6 +86,10 @@ lib_symbol **
 lib_syms_find_all(const char *to_find, lib_symbol_list *list)
 {
     lib_symbol **res = calloc(MAX_FIND_ALL_COUNT, sizeof(lib_symbol *));
+    if (!res)
+    {
+        err(1, "Error allocating temporary memory for library symbol lookup!");
+    }
     unsigned int res_sz = 0;
     tommy_hashtable_node *curr_node
         = tommy_hashtable_bucket(list, hashtable_hash(to_find));

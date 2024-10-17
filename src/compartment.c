@@ -12,6 +12,11 @@ extern const unsigned short max_env_count;
  * Forward declarations
  ******************************************************************************/
 
+static struct Compartment *
+comp_init();
+static struct LibDependency *
+lib_init();
+
 static struct LibDependency *
 parse_lib_file(char *, struct Compartment *);
 static void
@@ -26,6 +31,9 @@ static void
 map_comp_entry_points(struct Compartment *);
 static void
 resolve_rela_syms(struct Compartment *);
+static void
+find_tls_lookup_func(struct Compartment *);
+
 static bool
 check_lib_dep_sym(lib_symbol *, const unsigned short);
 static void *
@@ -62,12 +70,11 @@ print_lib_dep(struct LibDependency *);
 /* Initialize some values of the Compartment struct. The rest are expected to
  * be set in `comp_from_elf`.
  */
-struct Compartment *
+static struct Compartment *
 comp_init()
 {
     // TODO order
-    struct Compartment *new_comp
-        = (struct Compartment *) malloc(sizeof(struct Compartment));
+    struct Compartment *new_comp = malloc(sizeof(struct Compartment));
 
     new_comp->ddc = NULL;
 
@@ -94,6 +101,35 @@ comp_init()
     return new_comp;
 }
 
+static struct LibDependency *
+lib_init()
+{
+    struct LibDependency *new_lib = malloc(sizeof(struct LibDependency));
+
+    new_lib->lib_name = NULL;
+    new_lib->lib_path = NULL;
+    new_lib->lib_mem_base = 0x0;
+
+    new_lib->lib_segs_count = 0;
+    new_lib->lib_segs_size = 0;
+    new_lib->lib_segs = NULL;
+
+    new_lib->lib_syms = NULL;
+
+    new_lib->lib_dep_count = 0;
+    new_lib->lib_dep_names = NULL;
+
+    new_lib->rela_maps_count = 0;
+    new_lib->rela_maps = NULL;
+
+    new_lib->tls_sec_addr = 0x0;
+    new_lib->tls_sec_size = 0;
+    new_lib->tls_data_size = 0;
+    new_lib->tls_offset = 0;
+
+    return new_lib;
+}
+
 /* Give a binary ELF file in `filename`, read the ELF data and store it within
  * a `struct Compartment`. At this point, we only read data.
  */
@@ -110,23 +146,10 @@ comp_from_elf(char *filename, struct CompConfig *cc)
     char **libs_to_parse = malloc(sizeof(char *));
     libs_to_parse[0] = filename;
 
-    char *libs_folder = getenv(libs_path_env_var);
-
     while (libs_parsed_count != libs_to_parse_count)
     {
         struct LibDependency *parsed_lib
             = parse_lib_file(libs_to_parse[libs_parsed_count], new_comp);
-
-        // Get `tls_lookup_func` if we parsed `comp_utils.so`
-        if (!strcmp(parsed_lib->lib_name, comp_utils_soname))
-        {
-            new_comp->tls_lookup_func
-                = (char *) (lib_syms_search(
-                      tls_rtld_dropin, parsed_lib->lib_syms)
-                                ->sym_offset)
-                + (intptr_t) parsed_lib->lib_mem_base;
-            assert(new_comp->tls_lookup_func);
-        }
 
         const unsigned short libs_to_search_count = libs_to_parse_count;
         for (size_t i = 0; i < parsed_lib->lib_dep_count; ++i)
@@ -286,13 +309,6 @@ comp_map(struct Compartment *to_map)
     to_map->mapped = true;
 }
 
-void
-ddc_set(void *__capability cap)
-{
-    assert(cap != NULL);
-    asm volatile("MSR DDC, %[cap]" : : [cap] "C"(cap) : "memory");
-}
-
 /* Execute a mapped compartment, by jumping to the appropriate entry point.
  *
  * The entry point is given as a function name in the `fn_name` argument, and
@@ -432,11 +448,22 @@ parse_lib_file(char *lib_name, struct Compartment *new_comp)
     {
         // Try to find the library in dependent paths
         // TODO currently only $COMP_LIBRARY_PATH
+        if (getenv(libs_path_env_var) == NULL)
+        {
+            errx(1,
+                "Environment variable `%s` for library dependencies paths not "
+                "set!",
+                libs_path_env_var);
+        }
         lib_path = find_in_dir(lib_name, getenv(libs_path_env_var));
+        if (!lib_path)
+        {
+            errx(1, "Did not find file for lib `%s`!", lib_name);
+        }
         lib_fd = open(lib_path, O_RDONLY);
         if (lib_fd == -1)
         {
-            errx(1, "Error opening compartment file  %s!", lib_name);
+            err(1, "Error opening compartment file %s", lib_name);
         }
     }
 
@@ -451,38 +478,18 @@ parse_lib_file(char *lib_name, struct Compartment *new_comp)
             lib_path);
     }
 
-    struct LibDependency *new_lib = malloc(sizeof(struct LibDependency));
+    struct LibDependency *new_lib = lib_init();
     new_lib->lib_name = malloc(strlen(lib_name) + 1);
     strcpy(new_lib->lib_name, lib_name);
     if (lib_path)
     {
-        new_lib->lib_path = malloc(strlen(lib_path) + 1);
-        strcpy(new_lib->lib_path, lib_path);
+        new_lib->lib_path = lib_path;
     }
     else
     {
         new_lib->lib_path = malloc(strlen(lib_name) + 1);
         strcpy(new_lib->lib_path, lib_name);
     }
-
-    // Initialization
-    new_lib->lib_mem_base = NULL;
-
-    new_lib->lib_segs_count = 0;
-    new_lib->lib_segs_size = 0;
-    new_lib->lib_segs = NULL;
-
-    new_lib->lib_syms = NULL;
-
-    new_lib->lib_dep_count = 0;
-    new_lib->lib_dep_names = NULL;
-
-    new_lib->rela_maps_count = 0;
-    new_lib->rela_maps = NULL;
-
-    new_lib->tls_sec_addr = 0x0;
-    new_lib->tls_sec_size = 0;
-    new_lib->tls_data_size = 0;
 
     parse_lib_segs(&lib_ehdr, lib_fd, new_lib, new_comp);
 
@@ -516,37 +523,31 @@ parse_lib_file(char *lib_name, struct Compartment *new_comp)
     // that this can be changed in future specifications.
     //
     // Source: https://refspecs.linuxfoundation.org/elf/elf.pdf
-    const size_t headers_of_interest_count = 4;
-    size_t found_headers = 0;
     Elf64_Shdr curr_shdr;
     for (size_t i = 0; i < lib_ehdr.e_shnum; ++i)
     {
         do_pread(lib_fd, &curr_shdr, sizeof(Elf64_Shdr),
             lib_ehdr.e_shoff + i * sizeof(Elf64_Shdr));
 
-        if (curr_shdr.sh_type == SHT_SYMTAB)
+        if (curr_shdr.sh_type == SHT_SYMTAB || curr_shdr.sh_type == SHT_DYNSYM)
         {
             parse_lib_symtb(&curr_shdr, &lib_ehdr, lib_fd, new_lib);
-            found_headers += 1;
         }
         // Lookup `.rela.plt` to eagerly load relocatable function addresses
         else if (curr_shdr.sh_type == SHT_RELA
             && !strcmp(&shstrtab[curr_shdr.sh_name], ".rela.plt"))
         {
             parse_lib_rela(&curr_shdr, &lib_ehdr, lib_fd, new_lib);
-            found_headers += 1;
         }
         else if (curr_shdr.sh_type == SHT_RELA
             && !strcmp(&shstrtab[curr_shdr.sh_name], ".rela.dyn"))
         {
             parse_lib_rela(&curr_shdr, &lib_ehdr, lib_fd, new_lib);
-            found_headers += 1;
         }
         // Lookup `.dynamic` to find library dependencies
         else if (curr_shdr.sh_type == SHT_DYNAMIC)
         {
             parse_lib_dynamic_deps(&curr_shdr, &lib_ehdr, lib_fd, new_lib);
-            found_headers += 1;
         }
         // Section containing TLS static data
         else if (curr_shdr.sh_type == SHT_PROGBITS
@@ -556,15 +557,17 @@ parse_lib_file(char *lib_name, struct Compartment *new_comp)
             new_lib->tls_data_size = curr_shdr.sh_size;
         }
     }
-    assert(headers_of_interest_count == found_headers);
 
     close(lib_fd);
     new_comp->libs_count += 1;
     new_comp->libs = realloc(
         new_comp->libs, new_comp->libs_count * sizeof(struct LibDependency *));
     new_comp->libs[new_comp->libs_count - 1] = new_lib;
-    update_comp_syms(
-        new_comp->comp_syms, new_lib->lib_syms, new_comp->libs_count - 1);
+    if (new_lib->lib_syms)
+    {
+        update_comp_syms(
+            new_comp->comp_syms, new_lib->lib_syms, new_comp->libs_count - 1);
+    }
 
     free(shstrtab);
 
@@ -648,8 +651,12 @@ parse_lib_symtb(Elf64_Shdr *symtb_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
     size_t lib_syms_count = symtb_shdr->sh_size / sizeof(Elf64_Sym);
     size_t actual_syms = 0;
 
+    if (!lib_dep->lib_syms)
+    {
+        lib_dep->lib_syms = lib_syms_init();
+    }
+
     Elf64_Sym curr_sym;
-    lib_symbol_list *ld_syms = lib_syms_init();
     lib_symbol *to_insert;
     for (size_t j = 0; j < lib_syms_count; ++j)
     {
@@ -668,9 +675,8 @@ parse_lib_symtb(Elf64_Shdr *symtb_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
         to_insert->sym_type = ELF64_ST_TYPE(curr_sym.st_info);
         to_insert->sym_bind = ELF64_ST_BIND(curr_sym.st_info);
         to_insert->sym_shndx = curr_sym.st_shndx;
-        lib_syms_insert(to_insert, ld_syms);
+        lib_syms_insert(to_insert, lib_dep->lib_syms);
     }
-    lib_dep->lib_syms = ld_syms;
 
     free(sym_tb);
     free(str_tb);
@@ -925,8 +931,10 @@ resolve_rela_syms(struct Compartment *new_comp)
     struct LibRelaMapping *curr_rela_map;
     comp_symbol **candidate_syms;
     comp_symbol *chosen_sym;
+    bool lel = true;
     for (size_t i = 0; i < new_comp->libs_count; ++i)
     {
+        lel = true;
         for (size_t j = 0; j < new_comp->libs[i]->rela_maps_count; ++j)
         {
             curr_rela_map = &new_comp->libs[i]->rela_maps[j];
@@ -984,6 +992,7 @@ resolve_rela_syms(struct Compartment *new_comp)
                             curr_rela_map->rela_sym_type, j,
                             new_comp->libs[i]->lib_name, i);
                     }
+                    free(candidate_syms);
                     continue;
                 }
 
@@ -1000,22 +1009,23 @@ resolve_rela_syms(struct Compartment *new_comp)
             if (curr_rela_map->rela_sym_bind == STB_WEAK)
             {
                 comp_symbol *fallback_sym = NULL;
-                while (*candidate_syms)
+                comp_symbol **candidate_syms_iter = candidate_syms;
+                while (*candidate_syms_iter)
                 {
-                    if (check_lib_dep_sym((*candidate_syms)->sym_ref,
+                    if (check_lib_dep_sym((*candidate_syms_iter)->sym_ref,
                             curr_rela_map->rela_sym_type))
                     {
-                        if ((*candidate_syms)->sym_lib_idx != i)
+                        if ((*candidate_syms_iter)->sym_lib_idx != i)
                         {
-                            chosen_sym = *candidate_syms;
+                            chosen_sym = *candidate_syms_iter;
                             break;
                         }
                         else if (!fallback_sym)
                         {
-                            fallback_sym = *candidate_syms;
+                            fallback_sym = *candidate_syms_iter;
                         }
                     }
-                    candidate_syms += 1;
+                    candidate_syms_iter += 1;
                 }
                 if (!chosen_sym)
                 {
@@ -1043,6 +1053,19 @@ resolve_rela_syms(struct Compartment *new_comp)
             }
         }
         prev_tls_secs_size += new_comp->libs[i]->tls_sec_size;
+    }
+}
+
+/* Search existing compartment symbols to see if we defined a
+ * `tls_lookup_func`
+ */
+void
+find_tls_lookup_func(struct Compartment *comp)
+{
+    comp_symbol *tls_lf = comp_syms_search(tls_rtld_dropin, comp->comp_syms);
+    if (tls_lf)
+    {
+        comp->tls_lookup_func = eval_sym_offset(comp, tls_lf);
     }
 }
 
@@ -1083,21 +1106,23 @@ eval_sym_tls_offset(struct Compartment *comp, const comp_symbol *sym)
         + comp->libs[sym->sym_lib_idx]->tls_offset;
 }
 
+// TODO relocate all `NOTYPE` symbols to same symbol - cache?
 static bool
-check_lib_dep_sym(lib_symbol *sym, const unsigned short sym_type)
+check_lib_dep_sym(lib_symbol *sym, const unsigned short rela_type)
 {
     return
         // Ignore `LOCAL` bind symbols - they cannot be relocated against
         sym->sym_bind != STB_LOCAL &&
         // Check symbol is indeed local, not another external reference
         sym->sym_shndx != 0 &&
-        // Check symbol type matches
-        sym->sym_type == sym_type;
+        // Check symbol type matches, or relocation is `NOTYPE`
+        (rela_type == STT_NOTYPE || sym->sym_type == rela_type);
 }
 
 static char *
 find_in_dir(const char *const lib_name, char *search_dir)
 {
+    char *res = NULL;
     assert(search_dir != NULL);
     char **search_paths = malloc(2 * sizeof(char *));
     search_paths[0] = search_dir;
@@ -1113,6 +1138,8 @@ find_in_dir(const char *const lib_name, char *search_dir)
     {
         if (!strcmp(lib_name, curr_entry->fts_name))
         {
+            res = malloc(curr_entry->fts_pathlen + 1);
+            strcpy(res, curr_entry->fts_path);
             break;
         }
     }
@@ -1120,7 +1147,7 @@ find_in_dir(const char *const lib_name, char *search_dir)
     free(search_paths);
     if (curr_entry != NULL)
     {
-        return curr_entry->fts_path;
+        return res;
     }
     return NULL;
 }
@@ -1204,6 +1231,8 @@ resolve_comp_tls_regions(struct Compartment *new_comp)
     {
         return;
     }
+
+    find_tls_lookup_func(new_comp);
     assert(new_comp->tls_lookup_func);
 
     // TODO currently we only support one thread

@@ -20,7 +20,9 @@
 // TODO consider re-organizing
 #include "symbols_comp.h"
 
+#ifdef __CHERI__
 #include "cheriintrin.h"
+#endif
 
 // Morello `gcc` defines `ptraddr_t` in `stddef.h`, while `clang` does so in
 // `stdint.h`
@@ -58,7 +60,8 @@ extern void *__capability comp_return_caps[2];
 // using `x` registers in `loading_params` in `transition.S`. This should be
 // the equivalent of checking for a 64-bit CHERI aware platform
 // TODO is there a better way to check?
-#if !(__LP64__ && defined(__CHERI__))
+// TODO recheck if we need this
+#if !defined(CHERI_COMP_LINUX) && !(__LP64__ && defined(__CHERI__))
 #error Expecting 64-bit Arm Morello platform
 #endif
 
@@ -211,8 +214,6 @@ struct Compartment
 
 int
 entry_point_cmp(const void *, const void *);
-struct Compartment *
-comp_init();
 struct Compartment *
 comp_from_elf(char *, struct CompConfig *); // char **, size_t, void *);
 void
