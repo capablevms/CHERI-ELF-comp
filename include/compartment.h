@@ -168,6 +168,12 @@ struct CompConfig
     struct CompEntryPointDef *entry_points;
     size_t entry_point_count;
     void *base_address;
+
+    // Variables related to `manager.h` prepared `environ` data
+    char **env_ptr; // pointer to `environ` array
+    size_t env_ptr_sz; // size of the array
+                       // TODO might be unneeded
+    unsigned short env_ptr_count; // number of entries
 };
 
 /**
@@ -218,6 +224,8 @@ struct Compartment *
 comp_from_elf(char *, struct CompConfig *); // char **, size_t, void *);
 void
 comp_map(struct Compartment *);
+void
+comp_unmap(struct Compartment *);
 void
 comp_map_full(struct Compartment *);
 int64_t

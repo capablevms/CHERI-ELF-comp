@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 project(CHERI_ELF_Compartments LANGUAGES C ASM)
 
 # Set global compilation options
-add_compile_options(-pedantic -Wextra -Wno-gnu-binary-literal -Wno-language-extension-token -Werror)
+add_compile_options(-pedantic -Wextra -Wno-gnu-binary-literal -Wno-language-extension-token $<$<CONFIG:Debug>:-Werror>)
 
 # Set useful directory variables
 set(TEST_DIR ${CMAKE_SOURCE_DIR}/tests)

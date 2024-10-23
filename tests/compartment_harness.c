@@ -60,7 +60,9 @@ main(int argc, char **argv)
     mock_cc->base_address = (void *) 0x1000000UL;
 
     struct Compartment *hw_comp = comp_from_elf(file, mock_cc);
+    hw_comp->id = 0;
 
+    comp_map(hw_comp);
     comp_clean(hw_comp);
     return 0;
 }
