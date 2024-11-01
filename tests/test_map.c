@@ -1,6 +1,8 @@
 #include "compartment.c"
 #include "manager.h"
 
+#include <stdio.h>
+
 int
 main()
 {
@@ -9,7 +11,13 @@ main()
 
     char *file = "./simple.so";
     struct Compartment *hw_comp = register_new_comp(file, true);
-    comp_map(hw_comp);
+    printf("REG DONE\n");
+    struct CompMapping *hw_map = mapping_new(hw_comp);
+    printf("\tsz - %#zx\n", hw_comp->total_size);
+    printf("NEW DONE\n");
+    mapping_free(hw_map);
+    printf("FREE DONE\n");
     comp_clean(hw_comp);
+    printf("CLEAN DONE\n");
     return 0;
 }

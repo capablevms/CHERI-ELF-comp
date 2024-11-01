@@ -4,10 +4,7 @@
 int
 main(void)
 {
-    FILE *my_stdout = fdopen(STDOUT_FILENO, "w");
-    const char *hw = "Hello World!";
-    fprintf(my_stdout, "Inside - %s\n", hw);
-    /*printf("Inside - %s\n", hw);*/
-    fclose(my_stdout);
+    printf("Inside - Hello World\n");
+    printf("Inside2 - Hello World\n");
     return 0;
 }

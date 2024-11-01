@@ -9,10 +9,12 @@ main()
 
     char *file = "./simple.so";
     struct Compartment *hw_comp = register_new_comp(file, true);
+    struct CompMapping *hw_map;
     for (size_t i = 0; i < 100; ++i)
     {
-        comp_map(hw_comp);
-        comp_unmap(hw_comp);
+        hw_map = mapping_new(hw_comp);
+        mapping_exec(hw_map, "main", NULL);
+        mapping_free(hw_map);
     }
     comp_clean(hw_comp);
     return 0;

@@ -24,11 +24,12 @@ main(int argc, char **argv)
     char *file = argv[1];
 
     struct Compartment *arg_comp = register_new_comp(file, false);
-    comp_map(arg_comp);
+    struct CompMapping *arg_map = mapping_new(arg_comp);
 
     char *entry_func = argv[2];
     char **entry_func_args = &argv[3];
-    int comp_result = exec_comp(arg_comp, argv[2], &argv[3]);
+    int comp_result = mapping_exec(arg_map, argv[2], &argv[3]);
+    mapping_free(arg_map);
     comp_clean(arg_comp);
     return comp_result;
 }

@@ -31,12 +31,8 @@ extern struct Compartment *loaded_comp;
 // Compartment configuration file suffix
 extern const char *comp_config_suffix;
 
-void *
-get_next_comp_addr(void);
 struct Compartment *
 register_new_comp(char *, bool);
-int64_t
-exec_comp(struct Compartment *, char *, char **);
 
 union arg_holder
 {
@@ -57,7 +53,24 @@ void
 clean_compartment_config(struct CompEntryPointDef *, size_t);
 
 /*******************************************************************************
- * Memory allocation
+ * Compartment mappings
  ******************************************************************************/
+
+struct CompMapping *
+mapping_new(struct Compartment *);
+struct CompMapping *
+mapping_new_fixed(struct Compartment *, void *);
+void
+mapping_free(struct CompMapping *);
+int64_t
+mapping_exec(struct CompMapping *, char *, char **);
+
+struct CompMapping
+{
+    size_t id;
+    void *__capability ddc;
+    void *map_addr;
+    struct Compartment *comp;
+};
 
 #endif // _MANAGER_H

@@ -9,7 +9,9 @@
 // vDSO wrapper needed includes
 #include <time.h>
 
+#ifdef __CHERI__
 #include "cheriintrin.h"
+#endif
 
 // Forward declarations
 struct Compartment;
@@ -55,7 +57,8 @@ intercept_wrapper();
 void
 setup_intercepts();
 
-size_t
-my_call_comp(size_t, char *, void *);
+// TODO Reimplement this for inter-compartment function calls
+// size_t
+// my_call_comp(size_t, char *, void *);
 
 #endif // _INTERCEPT_H
