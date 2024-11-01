@@ -4,10 +4,6 @@ const char *libs_path_env_var = "COMP_LIBRARY_PATH";
 const char *tls_rtld_dropin = "tls_lookup_stub";
 const char *comp_utils_soname = "libcomputils.so";
 
-extern char **proc_env_ptr;
-extern const size_t max_env_sz;
-extern const unsigned short max_env_count;
-
 /*******************************************************************************
  * Forward declarations
  ******************************************************************************/
@@ -20,13 +16,15 @@ lib_init();
 static struct LibDependency *
 parse_lib_file(char *, struct Compartment *);
 static void
-parse_lib_segs(Elf64_Ehdr *, int, struct LibDependency *, struct Compartment *);
+parse_lib_segs(
+    Elf64_Ehdr *, void *, struct LibDependency *, struct Compartment *);
 static void
-parse_lib_symtb(Elf64_Shdr *, Elf64_Ehdr *, int, struct LibDependency *);
+parse_lib_symtb(Elf64_Shdr *, Elf64_Ehdr *, void *, struct LibDependency *);
 static void
-parse_lib_rela(Elf64_Shdr *, Elf64_Ehdr *, int, struct LibDependency *);
+parse_lib_rela(Elf64_Shdr *, Elf64_Ehdr *, void *, struct LibDependency *);
 static void
-parse_lib_dynamic_deps(Elf64_Shdr *, Elf64_Ehdr *, int, struct LibDependency *);
+parse_lib_dynamic_deps(
+    Elf64_Shdr *, Elf64_Ehdr *, void *, struct LibDependency *);
 static void
 map_comp_entry_points(struct Compartment *);
 static void
@@ -45,6 +43,10 @@ eval_sym_tls_offset(struct Compartment *, const comp_symbol *);
 
 static ssize_t
 do_pread(int, void *, size_t, off_t);
+static void
+get_lib_data(void *, void *, size_t, off_t);
+static void *
+seek_lib_data(void *, off_t);
 static char *
 find_in_dir(const char *, char *);
 static void
@@ -214,12 +216,21 @@ comp_map(struct Compartment *to_map)
 {
     assert(!(to_map->mapped));
     struct SegmentMap *curr_seg;
-    void *map_result;
 
     // Map compartment library dependencies segments
     struct LibDependency *lib_dep;
     struct SegmentMap lib_dep_seg;
     int lib_dep_fd;
+
+    void *map_result = mmap(to_map->base,
+        (intptr_t) ((char *) to_map->mem_top - (char *) to_map->base),
+        PROT_READ | PROT_WRITE | PROT_EXEC, // TODO fix
+        MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS, -1, 0);
+    if (map_result == MAP_FAILED)
+    {
+        err(1, "Error mapping compartment %zu data", to_map->id);
+    }
+
     for (size_t i = 0; i < to_map->libs_count; ++i)
     {
         lib_dep = to_map->libs[i];
@@ -227,16 +238,6 @@ comp_map(struct Compartment *to_map)
         for (size_t j = 0; j < lib_dep->lib_segs_count; ++j)
         {
             lib_dep_seg = lib_dep->lib_segs[j];
-            map_result = mmap((char *) lib_dep->lib_mem_base
-                    + (uintptr_t) lib_dep_seg.mem_bot,
-                lib_dep_seg.mem_sz,
-                PROT_READ | PROT_WRITE | PROT_EXEC, // TODO fix
-                MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS, -1, 0);
-            if (map_result == MAP_FAILED)
-            {
-                err(1, "Error mapping library %s dependency segment idx %zu",
-                    lib_dep->lib_name, j);
-            }
             do_pread(lib_dep_fd,
                 (char *) lib_dep->lib_mem_base
                     + (uintptr_t) lib_dep_seg.mem_bot,
@@ -269,13 +270,9 @@ comp_map(struct Compartment *to_map)
     to_map->environ_ptr += 1;
 
     // Copy over prepared `environ` data from manager
-    memcpy(to_map->environ_ptr, proc_env_ptr, max_env_sz);
-    for (unsigned short i = 0; i < max_env_count; ++i)
+    memcpy(to_map->environ_ptr, to_map->cc->env_ptr, to_map->cc->env_ptr_sz);
+    for (unsigned short i = 0; i < to_map->cc->env_ptr_count; ++i)
     {
-        if (*(to_map->environ_ptr + i) == 0x0)
-        {
-            break;
-        }
         // Update entry offsets relative to compartment address
         *(to_map->environ_ptr + i) += (uintptr_t) to_map->environ_ptr;
     }
@@ -307,6 +304,28 @@ comp_map(struct Compartment *to_map)
     }
 
     to_map->mapped = true;
+}
+
+void
+comp_unmap(struct Compartment *to_unmap)
+{
+    int res;
+
+    res = munmap(to_unmap->base,
+        (intptr_t) ((char *) to_unmap->mem_top - (char *) to_unmap->base));
+    if (res == -1)
+    {
+        err(1, "Error unmapping compartment %zu data", to_unmap->id);
+    }
+
+    res = munmap(
+        (void *) to_unmap->scratch_mem_base, to_unmap->scratch_mem_size);
+    if (res == -1)
+    {
+        err(1, "Error unmapping compartment %zu scratch memory", to_unmap->id);
+    }
+
+    to_unmap->mapped = false;
 }
 
 /* Execute a mapped compartment, by jumping to the appropriate entry point.
@@ -374,7 +393,7 @@ comp_clean(struct Compartment *to_clean)
 {
     if (to_clean->mapped)
     {
-        // TODO unmap
+        comp_unmap(to_clean);
     }
 
     struct LibDependency *curr_lib_dep;
@@ -467,9 +486,19 @@ parse_lib_file(char *lib_name, struct Compartment *new_comp)
         }
     }
 
+    struct stat lib_fd_stat;
+    if (fstat(lib_fd, &lib_fd_stat) == -1)
+    {
+        err(1, "Error accessing data for file %s", lib_path);
+    }
+    void *lib_data
+        = mmap(NULL, lib_fd_stat.st_size, PROT_READ, MAP_PRIVATE, lib_fd, 0);
+    close(lib_fd);
+
     // Read ELF headers
     Elf64_Ehdr lib_ehdr;
-    do_pread(lib_fd, &lib_ehdr, sizeof(Elf64_Ehdr), 0);
+    get_lib_data(&lib_ehdr, lib_data, sizeof(Elf64_Ehdr), 0);
+
     if (lib_ehdr.e_type != ET_DYN)
     {
         errx(1,
@@ -491,14 +520,13 @@ parse_lib_file(char *lib_name, struct Compartment *new_comp)
         strcpy(new_lib->lib_path, lib_name);
     }
 
-    parse_lib_segs(&lib_ehdr, lib_fd, new_lib, new_comp);
+    parse_lib_segs(&lib_ehdr, lib_data, new_lib, new_comp);
 
     // Load `.shstr` section, so we can check section names
     Elf64_Shdr shstrtab_hdr;
-    do_pread(lib_fd, &shstrtab_hdr, sizeof(Elf64_Shdr),
+    get_lib_data(&shstrtab_hdr, lib_data, sizeof(Elf64_Shdr),
         lib_ehdr.e_shoff + lib_ehdr.e_shstrndx * sizeof(Elf64_Shdr));
-    char *shstrtab = malloc(shstrtab_hdr.sh_size);
-    do_pread(lib_fd, shstrtab, shstrtab_hdr.sh_size, shstrtab_hdr.sh_offset);
+    char *shstrtab = (char *) seek_lib_data(lib_data, shstrtab_hdr.sh_offset);
 
     // XXX The string table is read in `strtab` as a sequence of
     // variable-length strings. Then, symbol names are obtained by indexing at
@@ -526,28 +554,28 @@ parse_lib_file(char *lib_name, struct Compartment *new_comp)
     Elf64_Shdr curr_shdr;
     for (size_t i = 0; i < lib_ehdr.e_shnum; ++i)
     {
-        do_pread(lib_fd, &curr_shdr, sizeof(Elf64_Shdr),
+        get_lib_data(&curr_shdr, lib_data, sizeof(Elf64_Shdr),
             lib_ehdr.e_shoff + i * sizeof(Elf64_Shdr));
 
         if (curr_shdr.sh_type == SHT_SYMTAB || curr_shdr.sh_type == SHT_DYNSYM)
         {
-            parse_lib_symtb(&curr_shdr, &lib_ehdr, lib_fd, new_lib);
+            parse_lib_symtb(&curr_shdr, &lib_ehdr, lib_data, new_lib);
         }
         // Lookup `.rela.plt` to eagerly load relocatable function addresses
         else if (curr_shdr.sh_type == SHT_RELA
             && !strcmp(&shstrtab[curr_shdr.sh_name], ".rela.plt"))
         {
-            parse_lib_rela(&curr_shdr, &lib_ehdr, lib_fd, new_lib);
+            parse_lib_rela(&curr_shdr, &lib_ehdr, lib_data, new_lib);
         }
         else if (curr_shdr.sh_type == SHT_RELA
             && !strcmp(&shstrtab[curr_shdr.sh_name], ".rela.dyn"))
         {
-            parse_lib_rela(&curr_shdr, &lib_ehdr, lib_fd, new_lib);
+            parse_lib_rela(&curr_shdr, &lib_ehdr, lib_data, new_lib);
         }
         // Lookup `.dynamic` to find library dependencies
         else if (curr_shdr.sh_type == SHT_DYNAMIC)
         {
-            parse_lib_dynamic_deps(&curr_shdr, &lib_ehdr, lib_fd, new_lib);
+            parse_lib_dynamic_deps(&curr_shdr, &lib_ehdr, lib_data, new_lib);
         }
         // Section containing TLS static data
         else if (curr_shdr.sh_type == SHT_PROGBITS
@@ -558,7 +586,6 @@ parse_lib_file(char *lib_name, struct Compartment *new_comp)
         }
     }
 
-    close(lib_fd);
     new_comp->libs_count += 1;
     new_comp->libs = realloc(
         new_comp->libs, new_comp->libs_count * sizeof(struct LibDependency *));
@@ -569,20 +596,18 @@ parse_lib_file(char *lib_name, struct Compartment *new_comp)
             new_comp->comp_syms, new_lib->lib_syms, new_comp->libs_count - 1);
     }
 
-    free(shstrtab);
-
     return new_lib;
 }
 
 static void
-parse_lib_segs(Elf64_Ehdr *lib_ehdr, int lib_fd, struct LibDependency *lib_dep,
-    struct Compartment *new_comp)
+parse_lib_segs(Elf64_Ehdr *lib_ehdr, void *lib_data,
+    struct LibDependency *lib_dep, struct Compartment *new_comp)
 {
     // Get segment data
     Elf64_Phdr lib_phdr;
     for (size_t i = 0; i < lib_ehdr->e_phnum; ++i)
     {
-        do_pread(lib_fd, &lib_phdr, sizeof(Elf64_Phdr),
+        get_lib_data(&lib_phdr, lib_data, sizeof(Elf64_Phdr),
             lib_ehdr->e_phoff + i * sizeof(lib_phdr));
 
         if (lib_phdr.p_type == PT_TLS)
@@ -634,19 +659,18 @@ parse_lib_segs(Elf64_Ehdr *lib_ehdr, int lib_fd, struct LibDependency *lib_dep,
 }
 
 static void
-parse_lib_symtb(Elf64_Shdr *symtb_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
+parse_lib_symtb(Elf64_Shdr *symtb_shdr, Elf64_Ehdr *lib_ehdr, void *lib_data,
     struct LibDependency *lib_dep)
 {
     // Get symbol table
     Elf64_Shdr link_shdr;
     assert(symtb_shdr->sh_link);
-    do_pread(lib_fd, &link_shdr, sizeof(Elf64_Shdr),
+    get_lib_data(&link_shdr, lib_data, sizeof(Elf64_Shdr),
         lib_ehdr->e_shoff + symtb_shdr->sh_link * sizeof(Elf64_Shdr));
 
-    Elf64_Sym *sym_tb = malloc(symtb_shdr->sh_size);
-    do_pread(lib_fd, sym_tb, symtb_shdr->sh_size, symtb_shdr->sh_offset);
-    char *str_tb = malloc(link_shdr.sh_size);
-    do_pread(lib_fd, str_tb, link_shdr.sh_size, link_shdr.sh_offset);
+    Elf64_Sym *sym_tb
+        = (Elf64_Sym *) seek_lib_data(lib_data, symtb_shdr->sh_offset);
+    char *str_tb = (char *) seek_lib_data(lib_data, link_shdr.sh_offset);
 
     size_t lib_syms_count = symtb_shdr->sh_size / sizeof(Elf64_Sym);
     size_t actual_syms = 0;
@@ -677,32 +701,28 @@ parse_lib_symtb(Elf64_Shdr *symtb_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
         to_insert->sym_shndx = curr_sym.st_shndx;
         lib_syms_insert(to_insert, lib_dep->lib_syms);
     }
-
-    free(sym_tb);
-    free(str_tb);
 }
 
 static void
-parse_lib_rela(Elf64_Shdr *rela_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
+parse_lib_rela(Elf64_Shdr *rela_shdr, Elf64_Ehdr *lib_ehdr, void *lib_data,
     struct LibDependency *lib_dep)
 {
     // Traverse `.rela.plt`, so we can see which function addresses we need
     // to eagerly load
-    Elf64_Rela *rela_sec = malloc(rela_shdr->sh_size);
-    do_pread(lib_fd, rela_sec, rela_shdr->sh_size, rela_shdr->sh_offset);
+    Elf64_Rela *rela_sec
+        = (Elf64_Rela *) seek_lib_data(lib_data, rela_shdr->sh_offset);
     size_t rela_count = rela_shdr->sh_size / sizeof(Elf64_Rela);
 
     Elf64_Shdr dyn_sym_hdr;
-    do_pread(lib_fd, &dyn_sym_hdr, sizeof(Elf64_Shdr),
+    get_lib_data(&dyn_sym_hdr, lib_data, sizeof(Elf64_Shdr),
         lib_ehdr->e_shoff + rela_shdr->sh_link * sizeof(Elf64_Shdr));
-    Elf64_Sym *dyn_sym_tbl = malloc(dyn_sym_hdr.sh_size);
-    do_pread(lib_fd, dyn_sym_tbl, dyn_sym_hdr.sh_size, dyn_sym_hdr.sh_offset);
+    Elf64_Sym *dyn_sym_tbl
+        = (Elf64_Sym *) seek_lib_data(lib_data, dyn_sym_hdr.sh_offset);
 
     Elf64_Shdr dyn_str_hdr;
-    do_pread(lib_fd, &dyn_str_hdr, sizeof(Elf64_Shdr),
+    get_lib_data(&dyn_str_hdr, lib_data, sizeof(Elf64_Shdr),
         lib_ehdr->e_shoff + dyn_sym_hdr.sh_link * sizeof(Elf64_Shdr));
-    char *dyn_str_tbl = malloc(dyn_str_hdr.sh_size);
-    do_pread(lib_fd, dyn_str_tbl, dyn_str_hdr.sh_size, dyn_str_hdr.sh_offset);
+    char *dyn_str_tbl = (char *) seek_lib_data(lib_data, dyn_str_hdr.sh_offset);
 
     // XXX Since TLSDESC entries might resolve to two relocation slots, we
     // ensure we have enough space by doubling the expected relocation counts
@@ -856,24 +876,19 @@ parse_lib_rela(Elf64_Shdr *rela_shdr, Elf64_Ehdr *lib_ehdr, int lib_fd,
     lib_dep->rela_maps_count += actual_relas;
 
     free(new_relas);
-    free(rela_sec);
-    free(dyn_sym_tbl);
-    free(dyn_str_tbl);
 }
 
 static void
 parse_lib_dynamic_deps(Elf64_Shdr *dynamic_shdr, Elf64_Ehdr *lib_ehdr,
-    int lib_fd, struct LibDependency *lib_dep)
+    void *lib_data, struct LibDependency *lib_dep)
 {
     // Find additional library dependencies
-    Elf64_Dyn *dyn_entries = malloc(dynamic_shdr->sh_size);
-    do_pread(
-        lib_fd, dyn_entries, dynamic_shdr->sh_size, dynamic_shdr->sh_offset);
+    Elf64_Dyn *dyn_entries
+        = (Elf64_Dyn *) seek_lib_data(lib_data, dynamic_shdr->sh_offset);
     Elf64_Shdr dynstr_shdr;
-    do_pread(lib_fd, &dynstr_shdr, sizeof(Elf64_Shdr),
+    get_lib_data(&dynstr_shdr, lib_data, sizeof(Elf64_Shdr),
         lib_ehdr->e_shoff + dynamic_shdr->sh_link * sizeof(Elf64_Shdr));
-    char *dynstr_tbl = malloc(dynstr_shdr.sh_size);
-    do_pread(lib_fd, dynstr_tbl, dynstr_shdr.sh_size, dynstr_shdr.sh_offset);
+    char *dynstr_tbl = (char *) seek_lib_data(lib_data, dynstr_shdr.sh_offset);
 
     for (size_t i = 0; i < dynamic_shdr->sh_size / sizeof(Elf64_Dyn); ++i)
     {
@@ -888,9 +903,6 @@ parse_lib_dynamic_deps(Elf64_Shdr *dynamic_shdr, Elf64_Ehdr *lib_ehdr,
             lib_dep->lib_dep_count += 1;
         }
     }
-
-    free(dynstr_tbl);
-    free(dyn_entries);
 }
 
 static void
@@ -1084,6 +1096,18 @@ do_pread(int fd, void *buf, size_t count, off_t offset)
     return res;
 }
 
+static void
+get_lib_data(void *buf, void *lib_file_addr, size_t data_sz, off_t offset)
+{
+    memcpy(buf, (char *) lib_file_addr + offset, data_sz);
+}
+
+static void *
+seek_lib_data(void *lib_data, off_t offset)
+{
+    return (void *) ((char *) lib_data + offset);
+}
+
 static void *
 eval_sym_offset(struct Compartment *comp, const comp_symbol *sym)
 {
@@ -1217,9 +1241,10 @@ get_extra_scratch_region_base(struct Compartment *new_comp)
 static void
 setup_environ(struct Compartment *new_comp)
 {
-    assert(proc_env_ptr != NULL); // TODO consider optional check
+    assert(new_comp->cc->env_ptr != NULL); // TODO consider optional check
     new_comp->environ_sz
-        = align_up(max_env_sz, new_comp->page_size) + new_comp->page_size;
+        = align_up(new_comp->cc->env_ptr_sz, new_comp->page_size)
+        + new_comp->page_size;
     new_comp->environ_ptr = get_extra_scratch_region_base(new_comp);
     adjust_comp_scratch_mem(new_comp, new_comp->environ_sz);
 }

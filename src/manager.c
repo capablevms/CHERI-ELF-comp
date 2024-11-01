@@ -19,6 +19,8 @@ void *__capability manager_ddc = 0;
 const char *comp_config_suffix = ".comp";
 
 char **proc_env_ptr = NULL;
+size_t proc_env_ptr_sz = 0;
+unsigned short proc_env_count = 0;
 const unsigned short avg_sz_per_env_entry = 128; // TODO
 const unsigned short max_env_count = 128; // TODO
 const size_t max_env_sz
@@ -113,10 +115,12 @@ register_new_comp(char *filename, bool allow_default_entry)
     struct CompConfig *new_cc
         = parse_compartment_config_file(filename, allow_default_entry);
     new_cc->base_address = get_next_comp_addr();
+    new_cc->env_ptr = proc_env_ptr;
+    new_cc->env_ptr_sz = proc_env_ptr_sz;
+    new_cc->env_ptr_count = proc_env_count;
 
     struct Compartment *new_comp = comp_from_elf(filename, new_cc);
     new_comp->id = comps_count;
-    new_comp->cc = new_cc;
     void *__capability new_comp_ddc
         = cheri_address_set(cheri_ddc_get(), (intptr_t) new_comp->base);
     new_comp_ddc = cheri_bounds_set(
@@ -364,21 +368,22 @@ prepare_compartment_environ()
 {
     proc_env_ptr = malloc(max_env_sz);
     memset(proc_env_ptr, 0, max_env_sz);
-    char **prov_env_vals = proc_env_ptr + max_env_count * sizeof(char *);
+    /*char **proc_env_vals = proc_env_ptr + max_env_count * sizeof(char *);*/
 
-    size_t envs_parsed = 0;
-    size_t envs_parsed_sz = 0;
     const uintptr_t vals_offset = max_env_count * sizeof(char *);
     for (char **curr_env = environ; *curr_env; curr_env++)
     {
         // We only save offsets for the pointers, since they'll be relocated
         // relative to the compartment base address
-        proc_env_ptr[envs_parsed] = (char *) (vals_offset + envs_parsed_sz);
-        strcpy((char *) proc_env_ptr + vals_offset + envs_parsed_sz, *curr_env);
+        proc_env_ptr[proc_env_count] = (char *) (vals_offset + proc_env_ptr_sz);
+        strcpy(
+            (char *) proc_env_ptr + vals_offset + proc_env_ptr_sz, *curr_env);
 
-        envs_parsed += 1;
-        envs_parsed_sz += strlen(*curr_env) + 1;
+        proc_env_count += 1;
+        proc_env_ptr_sz += strlen(*curr_env) + 1;
     }
+    proc_env_ptr_sz += vals_offset;
+    proc_env_ptr = realloc(proc_env_ptr, proc_env_ptr_sz);
 }
 
 static void *
