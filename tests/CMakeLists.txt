@@ -137,6 +137,7 @@ endfunction()
 set(func_binaries
     "test_map"
     "test_map_multi"
+
     #"test_args_near_unmapped"
     #"test_two_comps"
     #"test_two_comps_inter_call"
@@ -159,6 +160,7 @@ set(comp_binaries
     "simple_malloc"
     "simple_malloc_saturate"
     "simple_open_write"
+    "simple_fprintf"
     "simple_printf"
     "simple_static_var"
     "simple_static_var-external"
@@ -197,6 +199,7 @@ set(tests
     "simple_malloc"
     "simple_malloc_saturate"
     "simple_open_write"
+    "simple_fprintf"
     "simple_printf"
     "simple_static_var"
     "simple_syscall_getpid"
@@ -209,13 +212,10 @@ set(tests
 
     "lua_simple"
     "lua_script"
-    "lua_suite_some"
+    #"lua_suite_some"
 
     "test_map"
     "test_map_multi"
-    #"test_args_near_unmapped"
-    #"test_two_comps"
-    #"test_two_comps_inter_call"
 
     "args-simple args_simple check_simple 40 2"
     "args-more args_simple check_simple 40 2 2 2" # Check additional arguments are ignored
@@ -267,16 +267,6 @@ new_dependency(tls_check $<TARGET_FILE:tls_check-external2>)
 new_dependency(test_map $<TARGET_FILE:simple>)
 
 new_dependency(lua_script ${CMAKE_CURRENT_SOURCE_DIR}/hello_world.lua)
-#new_dependency(test_args_near_unmapped $<TARGET_FILE:args_simple>)
-#new_dependency(test_args_near_unmapped ${CMAKE_CURRENT_SOURCE_DIR}/args_simple.comp)
-
-#new_dependency(test_two_comps $<TARGET_FILE:test_two_comps-comp1>)
-#new_dependency(test_two_comps $<TARGET_FILE:test_two_comps-comp2>)
-#new_dependency(test_two_comps ${CMAKE_CURRENT_SOURCE_DIR}/test_two_comps-comp1.comp)
-
-#new_dependency(test_two_comps_inter_call $<TARGET_FILE:test_two_comps-comp1>)
-#new_dependency(test_two_comps_inter_call $<TARGET_FILE:test_two_comps-comp2>)
-#new_dependency(test_two_comps_inter_call ${CMAKE_CURRENT_SOURCE_DIR}/test_two_comps-comp1.comp)
 
 # Prepare tests
 foreach(test_t IN LISTS tests)

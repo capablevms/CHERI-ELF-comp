@@ -3,21 +3,93 @@
 
 #define __capability
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #define CHERI_COMP_LINUX
+typedef uintptr_t uintcap_t;
+
+uint64_t
+cheri_length_get(void *ptr)
+{
+    return (uint64_t) ptr;
+}
+
+uint64_t
+cheri_address_get(void *ptr)
+{
+    return (uint64_t) ptr;
+}
+
+uint64_t
+cheri_base_get(void *ptr)
+{
+    return (uint64_t) ptr;
+}
+
+uint64_t
+cheri_flags_get(void *ptr)
+{
+    return (uint64_t) ptr;
+}
+
+uint64_t
+cheri_perms_get(void *ptr)
+{
+    return (uint64_t) ptr;
+}
+
+uint64_t
+cheri_type_get(void *ptr)
+{
+    return (uint64_t) ptr;
+}
+
+bool
+cheri_tag_get(void *ptr)
+{
+    return ptr == 0x0;
+}
+
+uint64_t
+cheri_offset_get(void *ptr)
+{
+    return (uint64_t) ptr;
+}
+
+void *
+cheri_ddc_get()
+{
+    return 0x0;
+}
+
+void *
+cheri_address_set(void *ptr, intptr_t addr)
+{
+    void *_ptr = ptr;
+    return (void *) addr;
+}
+
+void *
+cheri_bounds_set(void *ptr, intptr_t addr)
+{
+    intptr_t _addr = addr;
+    return ptr;
+}
+
+void *
+cheri_offset_set(void *ptr, intptr_t addr)
+{
+    intptr_t _addr = addr;
+    return ptr;
+}
 
 #include "../src/compartment.c"
+#include "../src/manager.c"
 
 extern char **environ;
 char **proc_env_ptr;
 void *__capability sealed_redirect_cap = NULL;
-
-// XXX Should be unused
-const unsigned short avg_sz_per_env_entry = 128;
-const unsigned short max_env_count = 128;
-const size_t max_env_sz
-    = max_env_count * sizeof(char *) + avg_sz_per_env_entry * max_env_count;
 
 int64_t
 comp_exec_in(void *comp_sp, void *__capability comp_ddc, void *fn, void *args,
@@ -31,7 +103,8 @@ comp_exec_in(void *comp_sp, void *__capability comp_ddc, void *fn, void *args,
     void *__capability _src = src;
     void *_tls = tls;
 
-    return (int64_t) fn;
+    int64_t res = ((int64_t(*)()) fn)();
+    return res;
 }
 
 int
@@ -43,26 +116,12 @@ main(int argc, char **argv)
     }
     char *file = argv[1];
 
-    proc_env_ptr = environ;
-
-    struct CompEntryPointDef *mock_cep
-        = malloc(sizeof(struct CompEntryPointDef));
-    mock_cep->name = malloc(strlen("main") + 1);
-    strcpy((char *) mock_cep->name, "main");
-    mock_cep->arg_count = 0;
-    mock_cep->args_type = NULL;
-
-    struct CompConfig *mock_cc = malloc(sizeof(struct CompConfig));
-    mock_cc->heap_size = 0x800000UL;
-    mock_cc->stack_size = 0x80000UL;
-    mock_cc->entry_points = mock_cep;
-    mock_cc->entry_point_count = 1;
-    mock_cc->base_address = (void *) 0x1000000UL;
-
-    struct Compartment *hw_comp = comp_from_elf(file, mock_cc);
+    struct Compartment *hw_comp = register_new_comp(file, true);
     hw_comp->id = 0;
 
-    comp_map(hw_comp);
+    struct CompMapping *hw_map = mapping_new(hw_comp);
+    mapping_exec(hw_map, "main", NULL);
+    mapping_free(hw_map);
     comp_clean(hw_comp);
     return 0;
 }

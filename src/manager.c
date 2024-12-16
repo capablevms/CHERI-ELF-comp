@@ -18,6 +18,11 @@ void *__capability manager_ddc = 0;
 
 const char *comp_config_suffix = ".comp";
 
+// Constants for compartment environment setup. We allocate space for a maximum
+// of 128 entries, with a maximum size of 128 bytes per entry. Numbers chosen
+// aribtrarily.
+//
+// TODO consider better values for `avg_sz_per_env_entry` and `max_env_count`
 char **proc_env_ptr = NULL;
 size_t proc_env_ptr_sz = 0;
 unsigned short proc_env_count = 0;
@@ -27,7 +32,12 @@ const size_t max_env_sz
     = max_env_count * sizeof(char *) + avg_sz_per_env_entry * max_env_count;
 extern char **environ;
 
-// Functions
+/*******************************************************************************
+ * Forward declarations
+ ******************************************************************************/
+
+static void *get_next_comp_addr(size_t);
+static void *__capability make_new_ddc(struct Compartment *, void *);
 
 static struct CompConfig *
 parse_compartment_config_file(char *, bool);
@@ -46,22 +56,28 @@ prepare_compartment_environ();
 static void *
 prepare_compartment_args(char **args, struct CompEntryPointDef);
 
+static void *
+comp_ptr_to_mapping_addr(void *, void *);
+
 static struct Compartment *
 get_comp(struct Compartment *);
 
 // Printing
-static void print_full_cap(uintcap_t);
+static void
+print_full_cap(void *__capability);
 static void
 pp_cap(void *__capability);
 static void
 print_comp(struct Compartment *);
+static void
+print_mapping_simple(struct CompMapping *);
 
 /*******************************************************************************
  * Utility functions
  ******************************************************************************/
 
 static void
-print_full_cap(uintcap_t cap)
+print_full_cap(void *__capability cap)
 {
     uint32_t words[4]; // Hack to demonstrate! In real code, be more careful
                        // about sizes, etc.
@@ -87,21 +103,36 @@ pp_cap(void *__capability ptr)
 
     uint64_t offset = cheri_offset_get(ptr);
 
-    printf("Capability: %#lp\n", ptr);
+    printf("Capability: %#lx\n", (uintptr_t) ptr);
     printf("Tag: %d, Perms: %04lx, Type: %lx, Address: %04lx, Base: %04lx, "
            "End: %04lx, Flags: %lx, "
            "Length: %04lx, Offset: %04lx\n",
         tag, perms, type, address, base, base + length, flags, length, offset);
 }
 
-void *
-get_next_comp_addr(void)
+static void *
+get_next_comp_addr(size_t comp_sz)
 {
     if (min_next_comp_addr == NULL)
     {
         min_next_comp_addr = (void *) comp_start_addr;
     }
-    return min_next_comp_addr;
+    void *next_addr = min_next_comp_addr;
+    min_next_comp_addr = (char *) min_next_comp_addr
+        + align_up(comp_sz + comp_page_interval_count * sysconf(_SC_PAGESIZE),
+            sysconf(_SC_PAGESIZE));
+    return next_addr;
+}
+
+static void *__capability make_new_ddc(
+    struct Compartment *comp, void *target_addr)
+{
+    void *__capability new_ddc
+        = cheri_address_set(cheri_ddc_get(), (intptr_t) target_addr);
+    new_ddc = cheri_bounds_set(new_ddc, comp->total_size);
+    new_ddc
+        = cheri_offset_set(new_ddc, (uintptr_t) comp->scratch_mem_stack_top);
+    return new_ddc;
 }
 
 struct Compartment *
@@ -114,46 +145,171 @@ register_new_comp(char *filename, bool allow_default_entry)
 
     struct CompConfig *new_cc
         = parse_compartment_config_file(filename, allow_default_entry);
-    new_cc->base_address = get_next_comp_addr();
     new_cc->env_ptr = proc_env_ptr;
     new_cc->env_ptr_sz = proc_env_ptr_sz;
     new_cc->env_ptr_count = proc_env_count;
 
     struct Compartment *new_comp = comp_from_elf(filename, new_cc);
     new_comp->id = comps_count;
-    void *__capability new_comp_ddc
-        = cheri_address_set(cheri_ddc_get(), (intptr_t) new_comp->base);
-    new_comp_ddc = cheri_bounds_set(
-        new_comp_ddc, (char *) new_comp->mem_top - (char *) new_comp->base);
-    new_comp_ddc = cheri_offset_set(new_comp_ddc,
-        (char *) new_comp->scratch_mem_stack_top - (char *) new_comp->base);
-    new_comp->ddc = new_comp_ddc;
 
     comps_count += 1;
     comps = realloc(comps, comps_count * sizeof(struct Compartment *));
     comps[comps_count - 1] = new_comp;
 
-    min_next_comp_addr = align_up((char *) comp_start_addr + new_comp->size
-            + comp_page_interval_count * sysconf(_SC_PAGESIZE),
-        sysconf(_SC_PAGESIZE));
-
     return new_comp;
 }
 
-int64_t
-exec_comp(struct Compartment *to_exec, char *entry_fn, char **entry_fn_args)
+struct CompMapping *
+mapping_new(struct Compartment *to_map)
 {
-    struct CompEntryPointDef comp_entry
-        = get_entry_point(entry_fn, to_exec->cc);
-    void *comp_args = prepare_compartment_args(entry_fn_args, comp_entry);
+    return mapping_new_fixed(to_map, NULL);
+}
 
-    struct Compartment *old_comp = loaded_comp;
-    loaded_comp = to_exec;
-    int64_t exec_res
-        = comp_exec(to_exec, entry_fn, comp_args, comp_entry.arg_count);
-    loaded_comp = old_comp;
+struct CompMapping *
+mapping_new_fixed(struct Compartment *to_map, void *addr)
+{
+    int mmap_flags = MAP_PRIVATE | MAP_ANONYMOUS;
+    if (addr != NULL)
+    {
+        assert((uintptr_t) addr % to_map->page_size == 0);
+        mmap_flags |= MAP_FIXED;
+    }
+    // Map new compartment
+    void *map_result = mmap(addr, to_map->total_size,
+        PROT_READ | PROT_WRITE | PROT_EXEC, mmap_flags, -1, 0);
+    if (map_result == MAP_FAILED)
+    {
+        err(1, "Error mapping compartment %zu data at addr %p", to_map->id,
+            addr);
+    }
+    addr = map_result;
 
-    return exec_res;
+    memcpy(addr, to_map->staged_addr, to_map->total_size);
+
+    // Set appropriate `mprotect` flags
+    struct LibDependency *lib_dep;
+    struct SegmentMap lib_dep_seg;
+    for (size_t i = 0; i < to_map->libs_count; ++i)
+    {
+        lib_dep = to_map->libs[i];
+        for (size_t j = 0; j < lib_dep->lib_segs_count; ++j)
+        {
+            lib_dep_seg = lib_dep->lib_segs[j];
+            if (mprotect(get_seg_target(addr, lib_dep, j), lib_dep_seg.mem_sz,
+                    lib_dep_seg.prot_flags)
+                != 0)
+            {
+                err(1, "Error setting permissions for %p (lib %zu seg %zu)",
+                    get_seg_target(addr, lib_dep, j), i, j);
+            }
+        }
+    }
+
+    // Update `environ` pointers
+    void *environ_addr = (char *) to_map->environ_ptr + (uintptr_t) addr;
+    *((char **) environ_addr)
+        = (char *) environ_addr + (uintptr_t) * ((char **) environ_addr);
+
+    // Update the `environ` pointer with the mapping address
+    environ_addr = (char *) environ_addr + sizeof(void *);
+
+    // We update all `environ` entries
+    for (unsigned short i = 0; i < to_map->cc->env_ptr_count; ++i)
+    {
+        *((char **) environ_addr + i) += (uintptr_t) environ_addr;
+    }
+
+    // Perform relocations
+    struct LibRelaMapping *curr_rela_map;
+    for (size_t lib_idx = 0; lib_idx < to_map->libs_count; ++lib_idx)
+    {
+        for (size_t rela_idx = 0;
+             rela_idx < to_map->libs[lib_idx]->rela_maps_count; ++rela_idx)
+        {
+            curr_rela_map = &to_map->libs[lib_idx]->rela_maps[rela_idx];
+
+            if (!curr_rela_map->mapping_reloc)
+            {
+                continue;
+            }
+            *(void **) ((char *) curr_rela_map->rela_address + (uintptr_t) addr)
+                = (char *) curr_rela_map->target_func_address
+                + (uintptr_t) addr;
+        }
+    }
+
+    struct CompMapping *new_mapping = malloc(sizeof(struct CompMapping));
+    new_mapping->id = 0; // TODO
+    new_mapping->comp = to_map;
+    new_mapping->map_addr = addr;
+    new_mapping->ddc = make_new_ddc(to_map, addr);
+
+    return new_mapping;
+}
+
+void
+mapping_free(struct CompMapping *to_unmap)
+{
+    int res;
+
+    res = munmap(to_unmap->map_addr, to_unmap->comp->total_size);
+    if (res == -1)
+    {
+        err(1, "Error unmapping compartment %zu data at addr %p", to_unmap->id,
+            to_unmap->map_addr);
+    }
+    free(to_unmap);
+}
+
+static void *
+comp_ptr_to_mapping_addr(void *comp_ptr, void *mapping_addr)
+{
+    return (char *) comp_ptr + (uintptr_t) mapping_addr;
+}
+
+/* Execute a mapped compartment, by jumping to the appropriate entry point.
+ *
+ * The entry point is given as a function name in the `fn_name` argument, and
+ * arguments to be passed are tightly packed in `args`. The requested entry
+ * point must have been registered prior during compartment initialization, by
+ * calling `parse_compartment_config`, and passing an appropriate `.comp`
+ * config file.
+ */
+int64_t
+mapping_exec(struct CompMapping *to_exec, char *fn_name, char **fn_args_arr)
+{
+    struct CompConfig *to_exec_cc = to_exec->comp->cc;
+    struct CompEntryPointDef comp_entry = get_entry_point(fn_name, to_exec_cc);
+
+    // TODO remove
+    void *fn = NULL;
+    for (size_t i = 0; i < to_exec_cc->entry_point_count; ++i)
+    {
+        if (!strcmp(fn_name, to_exec_cc->entry_points[i].name))
+        {
+            fn = (void *) ((char *) to_exec_cc->entry_points[i].comp_addr
+                + (uintptr_t) to_exec->map_addr);
+            break;
+        }
+    }
+    if (!fn)
+    {
+        errx(1, "Did not find entry point `%s`!\n", fn_name);
+    }
+
+    void *fn_args = prepare_compartment_args(fn_args_arr, comp_entry);
+    assert(comp_entry.arg_count <= 3); // TODO currently hard limited by
+                                       // number of registers in
+                                       // `comp_exec_in`
+    void *comp_sp = comp_ptr_to_mapping_addr(
+        to_exec->comp->scratch_mem_stack_top, to_exec->map_addr);
+    void *comp_tls_region_start = comp_ptr_to_mapping_addr(
+        to_exec->comp->libs_tls_sects->region_start, to_exec->map_addr);
+    int64_t result
+        = comp_exec_in(comp_sp, to_exec->ddc, fn, fn_args, comp_entry.arg_count,
+            sealed_redirect_cap, (char *) comp_tls_region_start);
+    free(fn_args);
+    return result;
 }
 
 void
@@ -187,37 +343,6 @@ get_comp(struct Compartment *to_find)
         }
     }
     errx(1, "Couldn't find requested compartment with id %zu.", to_find->id);
-}
-
-struct Compartment *
-manager_find_compartment_by_addr(void *addr)
-{
-    size_t i;
-    for (i = 0; i < comps_count; ++i)
-    {
-        if (comps[i]->base <= addr
-            && (void *) ((char *) comps[i]->base + comps[i]->size) > addr)
-        {
-            break;
-        }
-    }
-    assert(i != comps_count);
-    return comps[i];
-}
-
-struct Compartment *
-manager_find_compartment_by_ddc(void *__capability ddc)
-{
-    size_t i;
-    for (i = 0; i < comps_count; ++i)
-    {
-        if (comps[i]->ddc == ddc)
-        {
-            return comps[i];
-        }
-    }
-    // TODO improve error message with ddc
-    errx(1, "Could not find compartment.");
 }
 
 struct Compartment *
@@ -449,7 +574,6 @@ make_default_comp_config()
     cc->stack_size = DEFAULT_COMP_STACK_SZ;
     cc->entry_points = make_default_comp_entry_point();
     cc->entry_point_count = 1;
-    cc->base_address = NULL;
     return cc;
 }
 
@@ -458,18 +582,8 @@ print_comp(struct Compartment *to_print)
 {
     printf("== COMPARTMENT\n");
     printf("- id : %lu\n", to_print->id);
-    {
-        printf("- DDC : ");
-        printf(" base - 0x%lx ", cheri_base_get(to_print->ddc));
-        printf(" length - 0x%lx ", cheri_length_get(to_print->ddc));
-        printf(" address - 0x%lx ", cheri_address_get(to_print->ddc));
-        printf(" offset - 0x%lx ", cheri_offset_get(to_print->ddc));
-        printf("\n");
-    }
-    printf("- size : 0x%zx\n", to_print->size);
-    printf("- base : %p\n", to_print->base);
-    printf("- mem_top : %p\n", to_print->mem_top);
-    printf("- mapped : %s\n", to_print->mapped ? "true" : "false");
+    printf("- total_size : 0x%zx\n", to_print->total_size);
+    printf("- data_size : 0x%zx\n", to_print->data_size);
 
     printf("- environ_ptr : %p\n", (void *) to_print->environ_ptr);
     printf("- environ_sz : 0x%zx\n", to_print->environ_sz);
@@ -501,4 +615,20 @@ print_comp(struct Compartment *to_print)
     printf("- page_size : %lu\n", to_print->page_size);
 
     printf("== DONE\n");
+}
+
+static void
+print_mapping_simple(struct CompMapping *to_print)
+{
+    printf("== MAPPING SIMPLE -- ID %zu\n", to_print->id);
+    printf("-- map_addr : %p\n", to_print->map_addr);
+    printf("-- DDC : ");
+    print_full_cap(to_print->ddc);
+    printf("-- total_size : %#zx\n", to_print->comp->total_size);
+    for (size_t i = 0; i < to_print->comp->libs_count; ++i)
+    {
+        printf("\t* lib %zu `%s` >> %p\n", i, to_print->comp->libs[i]->lib_name,
+            (void *) ((char *) to_print->comp->libs[i]->lib_mem_base
+                + (uintptr_t) to_print->map_addr));
+    }
 }
