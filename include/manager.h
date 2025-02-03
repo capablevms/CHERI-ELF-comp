@@ -14,8 +14,10 @@
 // Third-party libraries
 #include "toml.h"
 
+#include "benchmarking.h"
 #include "compartment.h"
 #include "intercept.h"
+#include "mappings.h"
 
 #define align_down(x, align) __builtin_align_down(x, align)
 #define align_up(x, align) __builtin_align_up(x, align)
@@ -51,26 +53,5 @@ void
 clean_comp(struct Compartment *);
 void
 clean_compartment_config(struct CompEntryPointDef *, size_t);
-
-/*******************************************************************************
- * Compartment mappings
- ******************************************************************************/
-
-struct CompMapping *
-mapping_new(struct Compartment *);
-struct CompMapping *
-mapping_new_fixed(struct Compartment *, void *);
-void
-mapping_free(struct CompMapping *);
-int64_t
-mapping_exec(struct CompMapping *, char *, char **);
-
-struct CompMapping
-{
-    size_t id;
-    void *__capability ddc;
-    void *map_addr;
-    struct Compartment *comp;
-};
 
 #endif // _MANAGER_H

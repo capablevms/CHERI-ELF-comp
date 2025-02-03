@@ -17,18 +17,21 @@ main(int argc, char **argv)
     manager_ddc = cheri_ddc_get();
     setup_intercepts();
 
-    assert(argc >= 4
-        && "Expect at least three arguments: binary file for compartment, "
-           "entry function for compartment, and at least one argument to pass "
-           "to compartment function.");
+    assert(argc >= 3
+        && "Expect at least two arguments: binary file for compartment, and "
+           "entry function for compartment.");
     char *file = argv[1];
 
     struct Compartment *arg_comp = register_new_comp(file, false);
     struct CompMapping *arg_map = mapping_new(arg_comp);
 
     char *entry_func = argv[2];
-    char **entry_func_args = &argv[3];
-    int comp_result = mapping_exec(arg_map, argv[2], &argv[3]);
+    char **entry_func_args = NULL;
+    if (argc > 3)
+    {
+        entry_func_args = &argv[3];
+    }
+    int comp_result = mapping_exec(arg_map, argv[2], entry_func_args);
     mapping_free(arg_map);
     comp_clean(arg_comp);
     return comp_result;

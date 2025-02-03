@@ -66,8 +66,8 @@ extern void *__capability comp_return_caps[2];
 #endif
 
 // Default sizes for compartment heap and stack, if not explicitly given
-#define DEFAULT_COMP_HEAP_SZ 0x800000UL // 800kB
-#define DEFAULT_COMP_STACK_SZ 0x80000UL // 80kB
+#define DEFAULT_COMP_HEAP_SZ 2 * 1024 * 1024 // 2MB
+#define DEFAULT_COMP_STACK_SZ 500 * 1024 // 500kB
 
 /* Struct representing one segment of an ELF binary.
  *
@@ -207,6 +207,8 @@ struct Compartment
     void *scratch_mem_stack_top;
     size_t scratch_mem_stack_size;
 
+    void *heap_mem_header;
+
     // Internal libraries and relocations
     size_t libs_count;
     struct LibDependency **libs;
@@ -238,5 +240,8 @@ get_seg_target(void *, struct LibDependency *, size_t);
 
 struct Compartment *
 find_comp(struct Compartment *);
+
+void
+print_comp_simple(struct Compartment *);
 
 #endif // _COMPARTMENT_H

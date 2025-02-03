@@ -84,8 +84,10 @@ cheri_offset_set(void *ptr, intptr_t addr)
     return ptr;
 }
 
+#include "../src/benchmarking.c"
 #include "../src/compartment.c"
 #include "../src/manager.c"
+#include "../src/mappings.c"
 
 extern char **environ;
 char **proc_env_ptr;

@@ -1,23 +1,24 @@
 set(BIN_INCLUDE_DIRS ${INCLUDE_DIR} ${TOML_INCLUDE_DIR} ${TOMMYDS_DIR})
+set(BIN_LINK_LIBS chcomp compbench)
 
 # Manager executables
 add_executable(manager_call
     ${TEST_DIR}/manager_caller.c
     )
 target_include_directories(manager_call PUBLIC ${BIN_INCLUDE_DIRS})
-target_link_libraries(manager_call PUBLIC chcomp)
+target_link_libraries(manager_call PUBLIC ${BIN_LINK_LIBS})
 
 add_executable(manager_call_multi
     ${TEST_DIR}/manager_caller_multiple.c
     )
 target_include_directories(manager_call_multi PUBLIC ${BIN_INCLUDE_DIRS})
-target_link_libraries(manager_call_multi PUBLIC chcomp)
+target_link_libraries(manager_call_multi PUBLIC ${BIN_LINK_LIBS})
 
 add_executable(manager_args
     ${TEST_DIR}/manager_arg_passer.c
     )
 target_include_directories(manager_args PUBLIC ${BIN_INCLUDE_DIRS})
-target_link_libraries(manager_args PUBLIC chcomp)
+target_link_libraries(manager_args PUBLIC ${BIN_LINK_LIBS})
 
 # Special tests
 add_executable(comp_harness EXCLUDE_FROM_ALL
@@ -71,7 +72,7 @@ endfunction()
 function(new_func_test test_name)
     add_executable(${test_name}
         ${test_name}.c)
-    target_link_libraries(${test_name} PRIVATE chcomp)
+    target_link_libraries(${test_name} PRIVATE ${BIN_LINK_LIBS})
     target_include_directories(${test_name} PRIVATE
         ${CMAKE_SOURCE_DIR}/src ${BIN_INCLUDE_DIRS})
 endfunction()
@@ -137,6 +138,7 @@ endfunction()
 set(func_binaries
     "test_map"
     "test_map_multi"
+    "test_ddc_overwrite"
 
     #"test_args_near_unmapped"
     #"test_two_comps"
@@ -158,7 +160,6 @@ set(comp_binaries
     "simple_global_var-external"
     "simple_libc"
     "simple_malloc"
-    "simple_malloc_saturate"
     "simple_open_write"
     "simple_fprintf"
     "simple_printf"
@@ -174,6 +175,9 @@ set(comp_binaries
     "tls_check"
     "tls_check-external1"
     "tls_check-external2"
+
+    "simple_malloc_saturate"
+    "fail_random_access"
 
     "lua_simple"
     "lua_script"
@@ -197,7 +201,6 @@ set(tests
     "simple_global_var"
     "simple_libc"
     "simple_malloc"
-    "simple_malloc_saturate"
     "simple_open_write"
     "simple_fprintf"
     "simple_printf"
@@ -210,12 +213,16 @@ set(tests
     "simple_va_args"
     "tls_check"
 
+    "simple_malloc_saturate"
+    "fail_random_access"
+
     "lua_simple"
     "lua_script"
     #"lua_suite_some"
 
     "test_map"
     "test_map_multi"
+    "test_ddc_overwrite"
 
     "args-simple args_simple check_simple 40 2"
     "args-more args_simple check_simple 40 2 2 2" # Check additional arguments are ignored
@@ -224,10 +231,15 @@ set(tests
     "args-long-max args_simple check_llong_max 9223372036854775807"
     "args-long-min args_simple check_llong_min -9223372036854775808"
     "args-ulong-max args_simple check_ullong_max 18446744073709551615"
+
+    "lua_script_hello lua_script do_script_hello"
+    "lua_script_memtest lua_script do_script_memtest"
     )
 
 set(tests_fail
     "simple_malloc_saturate@Memory saturated."
+    "fail_random_access@Caught SIGPROT"
+    "lua_script_memtest@Caught SIGPROT"
 )
 
 # Build targets
@@ -267,6 +279,7 @@ new_dependency(tls_check $<TARGET_FILE:tls_check-external2>)
 new_dependency(test_map $<TARGET_FILE:simple>)
 
 new_dependency(lua_script ${CMAKE_CURRENT_SOURCE_DIR}/hello_world.lua)
+new_dependency(lua_script ${CMAKE_CURRENT_SOURCE_DIR}/memtest.lua)
 
 # Prepare tests
 foreach(test_t IN LISTS tests)

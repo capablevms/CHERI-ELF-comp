@@ -16,7 +16,8 @@ COMP_LIBRARY_PATH = "testing/libs"
 
 LOCAL_LIBS = [
         "./third-party/lua/liblua.so",
-        "./build/src/libcomputils.so"
+        "./build/src/libcomputils.so",
+        "./build/src/libcompbench.so"
         ]
 REMOTE_LIBS = [
         "/lib/libc.so.7",
