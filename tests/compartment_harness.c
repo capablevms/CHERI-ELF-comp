@@ -58,7 +58,7 @@ cheri_offset_get(void *ptr)
 }
 
 void *
-cheri_ddc_get()
+cheri_ddc_get(void)
 {
     return 0x0;
 }

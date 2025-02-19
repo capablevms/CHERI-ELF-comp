@@ -26,7 +26,7 @@ test_leak(unsigned long long secret_addr)
 }
 
 int
-main()
+main(void)
 {
     int *secret = malloc(sizeof(int));
     *secret = 42;

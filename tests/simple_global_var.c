@@ -1,7 +1,7 @@
 #include <assert.h>
 
 int
-get_ext_val();
+get_ext_val(void);
 
 int
 main(void)

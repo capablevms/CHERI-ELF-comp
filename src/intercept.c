@@ -17,7 +17,7 @@ void *__capability sealed_redirect_cap;
  *      this is the only component visible to the compartments
  */
 void
-setup_intercepts()
+setup_intercepts(void)
 {
     sealed_redirect_cap = manager_ddc;
     sealed_redirect_cap

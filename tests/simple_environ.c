@@ -6,7 +6,7 @@
 extern char **environ;
 
 int
-main()
+main(void)
 {
     size_t i = 0;
     for (char **curr_env = environ; *curr_env; ++curr_env)

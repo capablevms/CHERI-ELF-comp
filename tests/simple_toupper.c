@@ -2,7 +2,7 @@
 #include <stdio.h>
 
 int
-main()
+main(void)
 {
     char x = 'x';
     printf("UPPER == %c\n", toupper(x));

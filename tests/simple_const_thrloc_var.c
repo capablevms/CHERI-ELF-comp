@@ -3,7 +3,7 @@
 _Thread_local const int *var;
 
 int
-main()
+main(void)
 {
     int v = 42;
     var = &v;

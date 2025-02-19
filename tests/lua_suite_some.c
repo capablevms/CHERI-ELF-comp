@@ -7,7 +7,7 @@
 #include <lualib.h>
 
 int
-main()
+main(void)
 {
     const char *test_dir = "./lua";
     const char *test_names[] = { "strings.lua", "utf8.lua", "goto.lua",

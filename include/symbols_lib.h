@@ -19,7 +19,7 @@ struct LibDependencySymbol
 };
 
 lib_symbol_list *
-lib_syms_init();
+lib_syms_init(void);
 void
 lib_syms_clean(lib_symbol_list *);
 void

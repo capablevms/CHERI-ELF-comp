@@ -42,7 +42,7 @@ lib_syms_print_one(void *sym)
  ******************************************************************************/
 
 lib_symbol_list *
-lib_syms_init()
+lib_syms_init(void)
 {
     lib_symbol_list *new_list = malloc(sizeof(lib_symbol_list));
     tommy_hashtable_init(new_list, HASHTABLE_MAX_SZ);

@@ -6,7 +6,7 @@
 #include <lualib.h>
 
 int
-simple_val()
+simple_val(void)
 {
     return 42;
 }
@@ -30,7 +30,7 @@ do_script_arg(char *script_path)
 }
 
 int
-do_script()
+do_script(void)
 {
     lua_State *L = luaL_newstate();
     luaL_openlibs(L);
@@ -42,7 +42,7 @@ do_script()
 }
 
 int
-main()
+main(void)
 {
     do_script_arg("./hello_world.lua");
     return 0;

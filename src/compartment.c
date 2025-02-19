@@ -9,9 +9,9 @@ const char *comp_utils_soname = "libcomputils.so";
  ******************************************************************************/
 
 static struct Compartment *
-comp_init();
+comp_init(void);
 static struct LibDependency *
-lib_init();
+lib_init(void);
 
 static struct LibDependency *
 parse_lib_file(char *, struct Compartment *);
@@ -77,7 +77,7 @@ print_comp_simple(struct Compartment *);
  * be set in `comp_from_elf`.
  */
 static struct Compartment *
-comp_init()
+comp_init(void)
 {
     // TODO order
     struct Compartment *new_comp = malloc(sizeof(struct Compartment));
@@ -105,7 +105,7 @@ comp_init()
 }
 
 static struct LibDependency *
-lib_init()
+lib_init(void)
 {
     struct LibDependency *new_lib = malloc(sizeof(struct LibDependency));
 

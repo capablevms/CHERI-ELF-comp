@@ -3,7 +3,7 @@
 extern unsigned short fortytwo;
 
 int
-main()
+main(void)
 {
     assert(fortytwo == 42);
     return 0;

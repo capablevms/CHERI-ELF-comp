@@ -18,7 +18,7 @@ main(int argc, char **argv)
     }
 
     dlerror();
-    void (*handle_main)() = (void (*)(void)) dlsym(handle, "main");
+    void (*handle_main)(void) = (void (*)(void)) dlsym(handle, "main");
     char *sym_err = dlerror();
     if (sym_err)
     {

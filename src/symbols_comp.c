@@ -41,7 +41,7 @@ comp_syms_print_one(void *sym)
  ******************************************************************************/
 
 comp_symbol_list *
-comp_syms_init()
+comp_syms_init(void)
 {
     comp_symbol_list *new_list = malloc(sizeof(comp_symbol_list));
     tommy_hashtable_init(new_list, HASHTABLE_MAX_SZ);

@@ -2,7 +2,7 @@
 #include <unistd.h>
 
 int
-main()
+main(void)
 {
     /*FILE* strem = __stdoutp;*/
     FILE *strem = fdopen(STDOUT_FILENO, "w");

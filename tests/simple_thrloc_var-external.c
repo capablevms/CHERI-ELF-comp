@@ -6,20 +6,20 @@ _Thread_local static int ex_val_stat = 242;
 _Thread_local int from_int;
 
 int
-get_ext()
+get_ext(void)
 {
     ex_val = 420;
     return ex_val;
 }
 
 int
-get_ext_stat()
+get_ext_stat(void)
 {
     return ex_val_stat;
 }
 
 void
-use_val()
+use_val(void)
 {
     ex_val_used = 24;
     assert(ex_val_used == 24);
