@@ -18,7 +18,7 @@ sum(int count, ...)
 }
 
 int
-main()
+main(void)
 {
     int suman = sum(3, 15, 30, -3);
     assert(suman == 42);

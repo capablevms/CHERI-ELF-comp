@@ -46,13 +46,13 @@ parse_compartment_config_params(const toml_table_t *, struct CompConfig *);
 static void
 parse_compartment_config(struct CompConfig *);
 static struct CompEntryPointDef *
-make_default_comp_entry_point();
+make_default_comp_entry_point(void);
 static struct CompConfig *
-make_default_comp_config();
+make_default_comp_config(void);
 static struct CompEntryPointDef
 get_entry_point(char *, const struct CompConfig *);
 static void
-prepare_compartment_environ();
+prepare_compartment_environ(void);
 static void *
 prepare_compartment_args(char **args, struct CompEntryPointDef);
 
@@ -313,7 +313,7 @@ mapping_exec(struct CompMapping *to_exec, char *fn_name, char **fn_args_arr)
 }
 
 void
-clean_all_comps()
+clean_all_comps(void)
 {
     for (size_t i = 0; i < comps_count; ++i)
     {
@@ -489,7 +489,7 @@ get_entry_point(char *entry_point_fn, const struct CompConfig *cc)
 }
 
 static void
-prepare_compartment_environ()
+prepare_compartment_environ(void)
 {
     proc_env_ptr = malloc(max_env_sz);
     memset(proc_env_ptr, 0, max_env_sz);
@@ -556,7 +556,7 @@ prepare_compartment_args(char **args, struct CompEntryPointDef cep)
 }
 
 static struct CompEntryPointDef *
-make_default_comp_entry_point()
+make_default_comp_entry_point(void)
 {
     struct CompEntryPointDef *cep = malloc(sizeof(struct CompEntryPointDef));
     cep->name = malloc(strlen("main") + 1);
@@ -567,7 +567,7 @@ make_default_comp_entry_point()
 }
 
 static struct CompConfig *
-make_default_comp_config()
+make_default_comp_config(void)
 {
     struct CompConfig *cc = malloc(sizeof(struct CompConfig));
     cc->heap_size = DEFAULT_COMP_HEAP_SZ;

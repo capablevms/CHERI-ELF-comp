@@ -209,7 +209,7 @@ reallocarray(void *to_realloc, size_t elem_count, size_t elem_size)
 }
 
 void
-tls_lookup_stub()
+tls_lookup_stub(void)
 {
     // Get TLS index
     // TODO works only for one TLS region

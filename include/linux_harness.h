@@ -4,7 +4,7 @@
 #define __capability
 
 void *
-cheri_ddc_get()
+cheri_ddc_get(void)
 {
     return NULL;
 }

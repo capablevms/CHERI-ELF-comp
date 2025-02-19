@@ -42,7 +42,7 @@ int64_t
 comp_exec_in(void *, void *__capability, void *, void *, size_t,
     void *__capability, void *);
 void
-comp_exec_out();
+comp_exec_out(void);
 
 // Declare built-in function for cache synchronization:
 // https://community.arm.com/arm-community-blogs/b/architectures-and-processors-blog/posts/caches-and-self-modifying-code

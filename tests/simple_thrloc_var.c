@@ -8,16 +8,16 @@ _Thread_local static long val4 = LONG_MAX;
 _Thread_local long val5;
 
 int
-get_ext();
+get_ext(void);
 int
-get_ext_stat();
+get_ext_stat(void);
 void
-use_val();
+use_val(void);
 void
 do_ext_check(int);
 
 int
-do_val2()
+do_val2(void)
 {
     assert(val2 == 4242);
     return val2;

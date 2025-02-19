@@ -46,7 +46,7 @@ union arg_holder
 char *
 prep_config_filename(char *);
 void
-clean_all_comps();
+clean_all_comps(void);
 void
 clean_comp(struct Compartment *);
 void

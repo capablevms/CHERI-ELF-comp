@@ -7,14 +7,14 @@ call_comp(size_t comp_id, char *fn_name, void *args, size_t arg_count)
 };
 
 int
-inter_call()
+inter_call(void)
 {
     size_t call_res = call_comp(1, "main", NULL, 0);
     return 0;
 }
 
 int
-main()
+main(void)
 {
     fprintf(stdout, "Hello, I am comp1.\n");
     return 0;

@@ -18,7 +18,7 @@ struct CompSymbol
 };
 
 comp_symbol_list *
-comp_syms_init();
+comp_syms_init(void);
 void
 comp_syms_clean(comp_symbol_list *);
 void

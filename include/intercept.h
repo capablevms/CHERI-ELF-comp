@@ -22,7 +22,7 @@ struct Compartment *manager_get_compartment_by_id(size_t);
 
 extern void *__capability manager_ddc;
 extern void
-comp_exec_out();
+comp_exec_out(void);
 
 // Number of capabilities required to perform a transition
 #define COMP_RETURN_CAPS_COUNT 2
@@ -52,10 +52,10 @@ struct FuncIntercept
  * most likely break things.
  */
 void
-intercept_wrapper();
+intercept_wrapper(void);
 
 void
-setup_intercepts();
+setup_intercepts(void);
 
 // TODO Reimplement this for inter-compartment function calls
 // size_t

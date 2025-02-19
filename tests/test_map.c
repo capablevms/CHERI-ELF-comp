@@ -4,7 +4,7 @@
 #include <stdio.h>
 
 int
-main()
+main(void)
 {
     manager_ddc = cheri_ddc_get();
     setup_intercepts();

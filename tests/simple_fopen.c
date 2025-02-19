@@ -6,7 +6,7 @@
 #include <unistd.h>
 
 void
-by_fopen()
+by_fopen(void)
 {
     FILE *fd = fopen("tmp", "w");
     if (!fd)
@@ -17,7 +17,7 @@ by_fopen()
 }
 
 void
-by_syscall()
+by_syscall(void)
 {
     int fd = syscall(SYS_open, "tmp", O_CREAT); // open
     if (fd == -1)
@@ -28,7 +28,7 @@ by_syscall()
 }
 
 void
-by_open()
+by_open(void)
 {
     int fd = open("tmp", O_CREAT);
     if (fd == -1)
@@ -39,7 +39,7 @@ by_open()
 }
 
 int
-main()
+main(void)
 {
     write(STDOUT_FILENO, "== By open\n", 11);
     by_open();
