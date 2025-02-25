@@ -1,0 +1,12 @@
+[do_script_hello]
+args_type = []
+
+[do_script_memtest]
+args_type = []
+
+[main]
+args_type = []
+
+[compconfig]
+heap=0x800000
+stack=0x80000

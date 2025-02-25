@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-const size_t max_heap_size = 0x800000;
+const size_t max_heap_size = 2 * 1024 * 1024;
 const size_t malloc_block_sz = 0x10;
 
 int

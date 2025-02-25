@@ -4,6 +4,7 @@
 static size_t comps_count = 0;
 struct Compartment **comps;
 struct Compartment *loaded_comp = NULL;
+mappings_list *mappings = NULL;
 
 // Variables and functions related to laying compartments in memory
 // TODO make start address configurable
@@ -47,6 +48,8 @@ static void
 parse_compartment_config(struct CompConfig *);
 static struct CompEntryPointDef *
 make_default_comp_entry_point(void);
+static void
+make_default_comp_params(struct CompConfig *);
 static struct CompConfig *
 make_default_comp_config(void);
 static struct CompEntryPointDef
@@ -56,6 +59,10 @@ prepare_compartment_environ(void);
 static void *
 prepare_compartment_args(char **args, struct CompEntryPointDef);
 
+static void
+mapping_reuse(struct CompMapping *);
+static void
+destroy_heap_allocations(void *);
 static void *
 comp_ptr_to_mapping_addr(void *, void *);
 
@@ -71,6 +78,15 @@ static void
 print_comp(struct Compartment *);
 static void
 print_mapping_simple(struct CompMapping *);
+
+static void
+dump_code(struct CompMapping *, int);
+static void
+dump_memory(struct CompMapping *, int);
+static void
+dump_stack_and_heap(struct CompMapping *, int);
+static void
+dump_mapping(struct CompMapping *, int);
 
 /*******************************************************************************
  * Utility functions
@@ -162,29 +178,45 @@ register_new_comp(char *filename, bool allow_default_entry)
 struct CompMapping *
 mapping_new(struct Compartment *to_map)
 {
+    if (!mappings)
+    {
+        mappings = mappings_init();
+    }
+
     return mapping_new_fixed(to_map, NULL);
 }
 
 struct CompMapping *
 mapping_new_fixed(struct Compartment *to_map, void *addr)
 {
-    int mmap_flags = MAP_PRIVATE | MAP_ANONYMOUS;
-    if (addr != NULL)
+    struct CompMapping *cached_mapping;
+    cached_mapping = mappings_search_free(to_map, mappings);
+    if (cached_mapping)
     {
-        assert((uintptr_t) addr % to_map->page_size == 0);
-        mmap_flags |= MAP_FIXED;
+        mapping_reuse(cached_mapping);
+        return cached_mapping;
     }
-    // Map new compartment
-    void *map_result = mmap(addr, to_map->total_size,
-        PROT_READ | PROT_WRITE | PROT_EXEC, mmap_flags, -1, 0);
-    if (map_result == MAP_FAILED)
+    else
     {
-        err(1, "Error mapping compartment %zu data at addr %p", to_map->id,
-            addr);
+        int mmap_flags = MAP_PRIVATE | MAP_ANONYMOUS;
+        if (addr != NULL)
+        {
+            assert((uintptr_t) addr % to_map->page_size == 0);
+            mmap_flags |= MAP_FIXED;
+        }
+        // Map new compartment
+        void *map_result = mmap(addr, to_map->total_size,
+            PROT_READ | PROT_WRITE | PROT_EXEC, mmap_flags, -1, 0);
+        if (map_result == MAP_FAILED)
+        {
+            err(1, "Error mapping compartment %zu data at addr %p", to_map->id,
+                addr);
+        }
+        addr = map_result;
     }
-    addr = map_result;
 
-    memcpy(addr, to_map->staged_addr, to_map->total_size);
+    memcpy(addr, to_map->staged_addr,
+        to_map->data_size + to_map->scratch_mem_extra);
 
     // Set appropriate `mprotect` flags
     struct LibDependency *lib_dep;
@@ -238,18 +270,43 @@ mapping_new_fixed(struct Compartment *to_map, void *addr)
         }
     }
 
+    // Update `heap_mem_header` address, if we saved it; we need to do this, as
+    // it is a static variable, thus it's address is not relocated, but taken
+    // as an offset from the program counter (TODO check)
+    if (to_map->heap_mem_header)
+    {
+        to_map->heap_mem_header
+            = (char *) to_map->heap_mem_header + (uintptr_t) addr;
+    }
+
+    if (cached_mapping)
+    {
+        cached_mapping->in_use = true;
+        return cached_mapping;
+    }
+
     struct CompMapping *new_mapping = malloc(sizeof(struct CompMapping));
-    new_mapping->id = 0; // TODO
+    new_mapping->id = 0; // TODO handle multiple compartments
     new_mapping->comp = to_map;
     new_mapping->map_addr = addr;
     new_mapping->ddc = make_new_ddc(to_map, addr);
+    new_mapping->in_use = true;
 
+    mapping_entry *new_me = malloc(sizeof(mapping_entry));
+    new_me->map_ref = new_mapping;
+    mappings_insert(new_me, mappings);
     return new_mapping;
 }
 
 void
 mapping_free(struct CompMapping *to_unmap)
 {
+    assert(to_unmap->in_use);
+    to_unmap->in_use = false;
+    return; // TODO this should properly cache a single, final compartment
+            // instance, and would ideally require cleanup at a future time,
+            // especially when multiple `Compartment` instances are available
+
     int res;
 
     res = munmap(to_unmap->map_addr, to_unmap->comp->total_size);
@@ -258,7 +315,132 @@ mapping_free(struct CompMapping *to_unmap)
         err(1, "Error unmapping compartment %zu data at addr %p", to_unmap->id,
             to_unmap->map_addr);
     }
+    mappings_delete(to_unmap, mappings);
     free(to_unmap);
+}
+
+/* Reuse a previously mapped and used compartment mapping, which we cached, and
+ * is currently unused. We need to do some reinitialisation (writable segments,
+ * scratch memory), but we preclude the need of more memory mapping / unmapping
+ * operations, which seem expensive.
+ */
+static void
+mapping_reuse(struct CompMapping *to_reuse)
+{
+    void *addr = to_reuse->map_addr;
+
+    // Copy over write-permission segments
+    size_t b_segs = bench_init("reuse-segs");
+    bench_start(b_segs);
+    struct LibDependency *lib_dep;
+    struct SegmentMap lib_dep_seg;
+    char *lib_dep_seg_off;
+    for (size_t i = 0; i < to_reuse->comp->libs_count; ++i)
+    {
+        lib_dep = to_reuse->comp->libs[i];
+        for (size_t j = 0; j < lib_dep->lib_segs_count; ++j)
+        {
+            lib_dep_seg = lib_dep->lib_segs[j];
+            if (lib_dep_seg.prot_flags & PROT_WRITE)
+            {
+                lib_dep_seg_off = (char *) lib_dep->lib_mem_base
+                    + (uintptr_t) lib_dep_seg.mem_bot;
+                memcpy(comp_ptr_to_mapping_addr(lib_dep_seg_off, addr),
+                    comp_ptr_to_mapping_addr(
+                        lib_dep_seg_off, to_reuse->comp->staged_addr),
+                    lib_dep_seg.mem_sz);
+            }
+        }
+    }
+    bench_end(b_segs);
+
+    // Copy over extra scratch memory
+    size_t b_scratch = bench_init("reuse-scratch");
+    bench_start(b_scratch);
+    memcpy(comp_ptr_to_mapping_addr(to_reuse->comp->scratch_mem_base, addr),
+        comp_ptr_to_mapping_addr(
+            to_reuse->comp->scratch_mem_base, to_reuse->comp->staged_addr),
+        to_reuse->comp->scratch_mem_extra);
+    bench_end(b_scratch);
+
+    // Zero out heap allocations
+    // XXX this doesn't clear the whole heap, so any out-of-bounds writes
+    // inside the compartment can leak information to future compartments
+    if (to_reuse->comp->heap_mem_header)
+    {
+        destroy_heap_allocations(to_reuse->comp->heap_mem_header);
+    }
+
+    // Zero out stack
+    bzero(comp_ptr_to_mapping_addr((char *) to_reuse->comp->scratch_mem_base
+                  + to_reuse->comp->scratch_mem_extra,
+              addr),
+        to_reuse->comp->scratch_mem_stack_size);
+
+    // Update `environ` pointers
+    size_t b_environ = bench_init("reuse-environ");
+    bench_start(b_environ);
+    void *environ_addr
+        = (char *) to_reuse->comp->environ_ptr + (uintptr_t) addr;
+    *((char **) environ_addr)
+        = (char *) environ_addr + (uintptr_t) * ((char **) environ_addr);
+
+    // Update the `environ` pointer with the mapping address
+    environ_addr = (char *) environ_addr + sizeof(void *);
+
+    // We update all `environ` entries
+    for (unsigned short i = 0; i < to_reuse->comp->cc->env_ptr_count; ++i)
+    {
+        *((char **) environ_addr + i) += (uintptr_t) environ_addr;
+    }
+    bench_end(b_environ);
+
+    // Perform relocations
+    size_t b_relas = bench_init("reuse-relas");
+    bench_start(b_relas);
+    struct LibRelaMapping *curr_rela_map;
+    for (size_t lib_idx = 0; lib_idx < to_reuse->comp->libs_count; ++lib_idx)
+    {
+        for (size_t rela_idx = 0;
+             rela_idx < to_reuse->comp->libs[lib_idx]->rela_maps_count;
+             ++rela_idx)
+        {
+            curr_rela_map = &to_reuse->comp->libs[lib_idx]->rela_maps[rela_idx];
+
+            if (!curr_rela_map->mapping_reloc)
+            {
+                continue;
+            }
+            *(void **) ((char *) curr_rela_map->rela_address + (uintptr_t) addr)
+                = (char *) curr_rela_map->target_func_address
+                + (uintptr_t) addr;
+        }
+    }
+    bench_end(b_relas);
+
+    to_reuse->in_use = true;
+}
+
+/* Takes a pointer to the address to the `heap_header`, as used in
+ * `comp_utils.c`, and iteratively deletes all allocations saved. We delete
+ * the allocation and the metadata in one single `bzero`.
+ */
+static void
+destroy_heap_allocations(void *heap_header)
+{
+    const size_t block_metadata_sz = sizeof(void *) + sizeof(size_t);
+
+    void *curr_block = *(void **) heap_header;
+    void *prev_block;
+    size_t block_sz;
+    while (curr_block)
+    {
+        block_sz = *(size_t *) ((char *) curr_block - block_metadata_sz);
+        prev_block = curr_block;
+        curr_block = *(void **) ((char *) curr_block - sizeof(void *));
+        explicit_bzero((char *) prev_block - block_metadata_sz,
+            block_metadata_sz + block_sz);
+    }
 }
 
 static void *
@@ -309,6 +491,7 @@ mapping_exec(struct CompMapping *to_exec, char *fn_name, char **fn_args_arr)
         = comp_exec_in(comp_sp, to_exec->ddc, fn, fn_args, comp_entry.arg_count,
             sealed_redirect_cap, (char *) comp_tls_region_start);
     free(fn_args);
+
     return result;
 }
 
@@ -405,7 +588,13 @@ parse_compartment_config_file(char *comp_filename, bool allow_default)
     free(config_filename);
     if (!config_fd)
     {
-        assert(allow_default);
+        if (!allow_default)
+        {
+            errx(1,
+                "Did not find config file `%s` and default config "
+                "disallowed",
+                comp_filename);
+        }
         errno = 0;
         return make_default_comp_config();
     }
@@ -424,10 +613,16 @@ parse_compartment_config_file(char *comp_filename, bool allow_default)
     size_t entry_point_count = toml_table_ntab(tab);
     new_cc->entry_point_count = entry_point_count;
     toml_table_t *comp_params = toml_table_in(tab, config_file_param_entry);
+
+    // TODO if `compconfig` is not last, this is broken
     if (comp_params)
     {
         parse_compartment_config_params(comp_params, new_cc);
         new_cc->entry_point_count -= 1;
+    }
+    else
+    {
+        make_default_comp_params(new_cc);
     }
 
     struct CompEntryPointDef *entry_points;
@@ -458,14 +653,24 @@ parse_compartment_config_file(char *comp_filename, bool allow_default)
             entry_points[i].name = malloc(strlen(fname) + 1);
             strcpy(entry_points[i].name, fname);
             entry_points[i].arg_count = func_arg_count;
-            entry_points[i].args_type = malloc(func_arg_count * sizeof(char *));
             entry_points[i].comp_addr = NULL;
-            for (size_t j = 0; j < func_arg_count; ++j)
+
+            if (func_arg_count == 0)
             {
-                toml_datum_t func_arg_type = toml_string_at(func_arg_types, j);
-                entry_points[i].args_type[j]
-                    = malloc(strlen(func_arg_type.u.s) + 1);
-                strcpy(entry_points[i].args_type[j], func_arg_type.u.s);
+                entry_points[i].args_type = NULL;
+            }
+            else
+            {
+                entry_points[i].args_type
+                    = malloc(func_arg_count * sizeof(char *));
+                for (size_t j = 0; j < func_arg_count; ++j)
+                {
+                    toml_datum_t func_arg_type
+                        = toml_string_at(func_arg_types, j);
+                    entry_points[i].args_type[j]
+                        = malloc(strlen(func_arg_type.u.s) + 1);
+                    strcpy(entry_points[i].args_type[j], func_arg_type.u.s);
+                }
             }
         }
     }
@@ -493,7 +698,6 @@ prepare_compartment_environ(void)
 {
     proc_env_ptr = malloc(max_env_sz);
     memset(proc_env_ptr, 0, max_env_sz);
-    /*char **proc_env_vals = proc_env_ptr + max_env_count * sizeof(char *);*/
 
     const uintptr_t vals_offset = max_env_count * sizeof(char *);
     for (char **curr_env = environ; *curr_env; curr_env++)
@@ -555,6 +759,13 @@ prepare_compartment_args(char **args, struct CompEntryPointDef cep)
     return parsed_args;
 }
 
+static void
+make_default_comp_params(struct CompConfig *cc)
+{
+    cc->heap_size = DEFAULT_COMP_HEAP_SZ;
+    cc->stack_size = DEFAULT_COMP_STACK_SZ;
+}
+
 static struct CompEntryPointDef *
 make_default_comp_entry_point(void)
 {
@@ -570,12 +781,15 @@ static struct CompConfig *
 make_default_comp_config(void)
 {
     struct CompConfig *cc = malloc(sizeof(struct CompConfig));
-    cc->heap_size = DEFAULT_COMP_HEAP_SZ;
-    cc->stack_size = DEFAULT_COMP_STACK_SZ;
+    make_default_comp_params(cc);
     cc->entry_points = make_default_comp_entry_point();
     cc->entry_point_count = 1;
     return cc;
 }
+
+/*******************************************************************************
+ * Print functions
+ ******************************************************************************/
 
 static void
 print_comp(struct Compartment *to_print)
@@ -631,4 +845,38 @@ print_mapping_simple(struct CompMapping *to_print)
             (void *) ((char *) to_print->comp->libs[i]->lib_mem_base
                 + (uintptr_t) to_print->map_addr));
     }
+}
+
+static void
+dump_memory(struct CompMapping *to_dump, int fd)
+{
+    write(fd,
+        comp_ptr_to_mapping_addr(
+            to_dump->comp->scratch_mem_base, to_dump->map_addr),
+        to_dump->comp->scratch_mem_size);
+}
+
+static void
+dump_code(struct CompMapping *to_dump, int fd)
+{
+    write(fd, to_dump->map_addr, to_dump->comp->data_size);
+}
+
+static void
+dump_stack_and_heap(struct CompMapping *to_dump, int fd)
+{
+    write(fd,
+        comp_ptr_to_mapping_addr((char *) to_dump->comp->scratch_mem_base
+                + (uintptr_t) to_dump->comp->scratch_mem_extra,
+            to_dump->map_addr),
+        to_dump->comp->scratch_mem_size - to_dump->comp->scratch_mem_extra);
+}
+
+static void
+dump_mapping(struct CompMapping *to_dump, int fd)
+{
+    dprintf(fd, "== MAPPING DUMP -- ID %zu -- MAIN PATH %s\n", to_dump->id,
+        to_dump->comp->libs[0]->lib_path);
+    dump_code(to_dump, fd);
+    dump_memory(to_dump, fd);
 }

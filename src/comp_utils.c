@@ -75,7 +75,9 @@ malloc(size_t to_alloc)
                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
             if (mem_begin == MAP_FAILED)
             {
-                err(1, "comp_utils: Failed `mmap`");
+                exit(1);
+                /*err(1, "comp_utils: Failed `mmap`"); // TODO replace with a
+                 * signal*/
             }
             mem_left = NON_COMP_DEFAULT_SIZE;
         }
@@ -175,7 +177,9 @@ free(void *to_free)
 void *
 calloc(size_t elem_count, size_t elem_size)
 {
-    return malloc(elem_count * elem_size);
+    void *alloc = malloc(elem_count * elem_size);
+    explicit_bzero(alloc, elem_count * elem_size);
+    return alloc;
 }
 
 void *

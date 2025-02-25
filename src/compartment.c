@@ -2,6 +2,7 @@
 
 const char *libs_path_env_var = "COMP_LIBRARY_PATH";
 const char *tls_rtld_dropin = "tls_lookup_stub";
+const char *comp_malloc_header = "heap_header";
 const char *comp_utils_soname = "libcomputils.so";
 
 /*******************************************************************************
@@ -66,8 +67,6 @@ static void
 print_lib_dep_seg(struct SegmentMap *);
 static void
 print_lib_dep(struct LibDependency *);
-static void
-print_comp_simple(struct Compartment *);
 
 /*******************************************************************************
  * Main compartment functions
@@ -93,6 +92,8 @@ comp_init(void)
     new_comp->scratch_mem_stack_top = NULL;
     new_comp->scratch_mem_stack_size = 0;
     new_comp->scratch_mem_extra = 0;
+
+    new_comp->heap_mem_header = NULL;
 
     new_comp->libs_count = 0;
     new_comp->libs = NULL;
@@ -171,6 +172,16 @@ comp_from_elf(char *filename, struct CompConfig *cc)
         next_dep:
             (void) 0;
         }
+
+        if (!strcmp(parsed_lib->lib_name, comp_utils_soname))
+        {
+            new_comp->heap_mem_header
+                = (char *) lib_syms_search(
+                      comp_malloc_header, parsed_lib->lib_syms)
+                      ->sym_offset
+                + (uintptr_t) parsed_lib->lib_mem_base;
+        }
+
         libs_parsed_count += 1;
     }
     free(libs_to_parse);
@@ -216,7 +227,6 @@ comp_from_elf(char *filename, struct CompConfig *cc)
     assert(new_comp->environ_sz + new_comp->total_tls_size
         == new_comp->scratch_mem_extra);
 
-    print_comp_simple(new_comp);
     return new_comp;
 }
 
@@ -1231,7 +1241,7 @@ print_lib_dep(struct LibDependency *lib_dep)
     printf("== DONE\n");
 }
 
-static void
+void
 print_comp_simple(struct Compartment *to_print)
 {
     printf("== COMPARTMENT SIMPLE -- ID %zu\n", to_print->id);
