@@ -323,15 +323,38 @@ mapping_free(struct CompMapping *to_unmap)
  * is currently unused. We need to do some reinitialisation (writable segments,
  * scratch memory), but we preclude the need of more memory mapping / unmapping
  * operations, which seem expensive.
+ *
+ * Order is slightly important here, as we might zero out some stuff we need
+ * for further zero-ing. Currently, it seems we must ensure the heap
+ * allocations are zeroed before the segments, but there might be further
+ * dependencies in the future
  */
 static void
 mapping_reuse(struct CompMapping *to_reuse)
 {
     void *addr = to_reuse->map_addr;
 
+    // Zero out heap allocations
+    // XXX this doesn't clear the whole heap, so any out-of-bounds writes
+    // inside the compartment can leak information to future compartments
+    if (to_reuse->comp->heap_mem_header)
+    {
+        destroy_heap_allocations(to_reuse->comp->heap_mem_header);
+    }
+
+    // Zero out stack
+    bzero(comp_ptr_to_mapping_addr((char *) to_reuse->comp->scratch_mem_base
+                  + to_reuse->comp->scratch_mem_extra,
+              addr),
+        to_reuse->comp->scratch_mem_stack_size);
+
+    // Copy over extra scratch memory
+    memcpy(comp_ptr_to_mapping_addr(to_reuse->comp->scratch_mem_base, addr),
+        comp_ptr_to_mapping_addr(
+            to_reuse->comp->scratch_mem_base, to_reuse->comp->staged_addr),
+        to_reuse->comp->scratch_mem_extra);
+
     // Copy over write-permission segments
-    size_t b_segs = bench_init("reuse-segs");
-    bench_start(b_segs);
     struct LibDependency *lib_dep;
     struct SegmentMap lib_dep_seg;
     char *lib_dep_seg_off;
@@ -352,34 +375,8 @@ mapping_reuse(struct CompMapping *to_reuse)
             }
         }
     }
-    bench_end(b_segs);
-
-    // Copy over extra scratch memory
-    size_t b_scratch = bench_init("reuse-scratch");
-    bench_start(b_scratch);
-    memcpy(comp_ptr_to_mapping_addr(to_reuse->comp->scratch_mem_base, addr),
-        comp_ptr_to_mapping_addr(
-            to_reuse->comp->scratch_mem_base, to_reuse->comp->staged_addr),
-        to_reuse->comp->scratch_mem_extra);
-    bench_end(b_scratch);
-
-    // Zero out heap allocations
-    // XXX this doesn't clear the whole heap, so any out-of-bounds writes
-    // inside the compartment can leak information to future compartments
-    if (to_reuse->comp->heap_mem_header)
-    {
-        destroy_heap_allocations(to_reuse->comp->heap_mem_header);
-    }
-
-    // Zero out stack
-    bzero(comp_ptr_to_mapping_addr((char *) to_reuse->comp->scratch_mem_base
-                  + to_reuse->comp->scratch_mem_extra,
-              addr),
-        to_reuse->comp->scratch_mem_stack_size);
 
     // Update `environ` pointers
-    size_t b_environ = bench_init("reuse-environ");
-    bench_start(b_environ);
     void *environ_addr
         = (char *) to_reuse->comp->environ_ptr + (uintptr_t) addr;
     *((char **) environ_addr)
@@ -393,11 +390,9 @@ mapping_reuse(struct CompMapping *to_reuse)
     {
         *((char **) environ_addr + i) += (uintptr_t) environ_addr;
     }
-    bench_end(b_environ);
 
     // Perform relocations
-    size_t b_relas = bench_init("reuse-relas");
-    bench_start(b_relas);
+    // TODO is this needed?
     struct LibRelaMapping *curr_rela_map;
     for (size_t lib_idx = 0; lib_idx < to_reuse->comp->libs_count; ++lib_idx)
     {
@@ -416,7 +411,6 @@ mapping_reuse(struct CompMapping *to_reuse)
                 + (uintptr_t) addr;
         }
     }
-    bench_end(b_relas);
 
     to_reuse->in_use = true;
 }
@@ -591,7 +585,7 @@ parse_compartment_config_file(char *comp_filename, bool allow_default)
         if (!allow_default)
         {
             errx(1,
-                "Did not find config file `%s` and default config "
+                "Did not find config file for `%s` and default config "
                 "disallowed",
                 comp_filename);
         }
