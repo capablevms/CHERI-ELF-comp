@@ -2,23 +2,23 @@ set(BIN_INCLUDE_DIRS ${INCLUDE_DIR} ${TOML_INCLUDE_DIR} ${TOMMYDS_DIR})
 set(BIN_LINK_LIBS chcomp compbench)
 
 # Manager executables
-add_executable(manager_call
-    ${TEST_DIR}/manager_caller.c
-    )
-target_include_directories(manager_call PUBLIC ${BIN_INCLUDE_DIRS})
-target_link_libraries(manager_call PUBLIC ${BIN_LINK_LIBS})
+function(new_manager_bin bin_name)
+    add_executable(${bin_name}
+        ${bin_name}.c)
+    target_include_directories(${bin_name} PUBLIC ${BIN_INCLUDE_DIRS})
+    target_link_libraries(${bin_name} PUBLIC ${BIN_LINK_LIBS})
+endfunction()
 
-add_executable(manager_call_multi
-    ${TEST_DIR}/manager_caller_multiple.c
-    )
-target_include_directories(manager_call_multi PUBLIC ${BIN_INCLUDE_DIRS})
-target_link_libraries(manager_call_multi PUBLIC ${BIN_LINK_LIBS})
+set(manager_bins
+    "manager_caller"
+    "manager_caller_multiple"
+    "manager_arg_passer"
+    "manager_arg_passer_multiple"
+)
 
-add_executable(manager_args
-    ${TEST_DIR}/manager_arg_passer.c
-    )
-target_include_directories(manager_args PUBLIC ${BIN_INCLUDE_DIRS})
-target_link_libraries(manager_args PUBLIC ${BIN_LINK_LIBS})
+foreach(bin_t IN LISTS manager_bins)
+    new_manager_bin(${bin_t})
+endforeach()
 
 # Special tests
 add_executable(comp_harness EXCLUDE_FROM_ALL
@@ -99,7 +99,7 @@ function(new_test test_name)
         if(is_comp)
             add_test(NAME ${test_name}
                      COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.py
-                             manager_call
+                             $<TARGET_FILE:manager_caller>
                              --test-args $<TARGET_FILE_NAME:${test_name}>
                              --dependencies ${deps_var}
                      COMMAND_EXPAND_LISTS)
@@ -118,7 +118,7 @@ function(new_test test_name)
         if(is_comp)
             add_test(NAME ${test_name}
                 COMMAND ${CMAKE_SOURCE_DIR}/tests/run_test.py
-                        manager_args
+                        $<TARGET_FILE:manager_arg_passer>
                         --test-args $<TARGET_FILE_NAME:${test_bin}> ${test_args}
                         --dependencies ${deps_var}
                 COMMAND_EXPAND_LISTS)
@@ -182,6 +182,7 @@ set(comp_binaries
     "lua_simple"
     "lua_script"
     "lua_suite_some"
+    "lua_script_selector"
 
     "args_simple"
     #"test_two_comps-comp1"
