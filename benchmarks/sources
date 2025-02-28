@@ -1,0 +1,4 @@
+The sources for these benchmarks are as follows:
+* `big.lua` and `math.lua` are part of the Lua test suite (https://www.lua.org/home.html)
+* tests pre-pended with `bench` are part of the `softdevteam` `lua_benchmarking` project (https://github.com/softdevteam/lua_benchmarking)
+* tests pre-pended with `bench2` are part of the `Lua-Benchmarks` suite packaged by Gabriel de Quadros Ligneul (https://github.com/gligneul/Lua-Benchmarks)
